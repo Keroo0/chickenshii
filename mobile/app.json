@@ -1,0 +1,49 @@
+{
+  "expo": {
+    "name": "ChickenShii",
+    "slug": "chikenshii",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "chikenshii",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.nirwanafarm.chikenshii"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "package": "com.nirwanafarm.chikenshii",
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Izinkan ChickenShii mengakses kamera untuk mengambil foto feses.",
+          "photosPermission": "Izinkan ChickenShii mengakses galeri untuk memilih foto feses."
+        }
+      ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "15b0b266-f6f6-4222-8d70-83e14d9e8016"
+      }
+    },
+    "owner": "kero0"
+  }
+}
