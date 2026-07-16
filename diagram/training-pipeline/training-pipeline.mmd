@@ -1,0 +1,20 @@
+graph TD
+  A[Dataset Kaggle - 8066 gambar] --> C[Gabungan Dataset - 8276 gambar]
+  B[Dataset Lapangan PT Nirwana Farm - 210 gambar] --> C
+
+  C --> D[Stratified Split 70-15-15]
+  D --> E[Training Set 70 persen]
+  D --> F[Validation Set 15 persen]
+  D --> G[Test Set 15 persen]
+
+  E --> H[Model 1 - Baseline Custom CNN]
+  E --> I[Model 2 - MobileNetV2 Feature Extraction]
+  E --> J[Model 3 - MobileNetV2 Fine-Tuning]
+
+  I --> J
+
+  H --> K[Evaluasi dan Perbandingan Ketiga Model]
+  I --> K
+  J --> K
+
+  K --> L[Model Terbaik disimpan sebagai .keras]

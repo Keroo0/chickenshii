@@ -88,7 +88,7 @@ export default function AdminLoginScreen() {
           <View className="items-center mb-8 gap-3">
             <View className="h-20 w-20 items-center justify-center rounded-3xl bg-primary-soft">
               <Image
-                source={require("../../assets/LOGO CHICKENSHII-nobg.png")}
+                source={require("../../assets/logo-chickenshii-nobg.png")}
                 className="h-14 w-14"
                 resizeMode="contain"
               />

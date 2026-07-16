@@ -1,0 +1,49 @@
+classDiagram
+  class MLService {
+    +model
+    +predict(file_bytes) dict
+  }
+
+  class SupabaseService {
+    +validate_worker_id(worker_id) dict
+    +upload_image(file_bytes, filename) str
+    +insert_prediction(image_url, prediction, confidence, all_predictions, worker_id) dict
+    +get_stats(period, reference_date) dict
+    +verify_admin_token(token)
+  }
+
+  class Router {
+    +health() dict
+    +predict_image(file) dict
+    +save_prediction(file, prediction, confidence, all_predictions, worker_id) PredictionSaveResponse
+    +get_stats(period, reference_date, authorization) StatsResponse
+  }
+
+  class PredictionResponse {
+    +class_name str
+    +confidence float
+    +confidence_threshold float
+    +probabilities dict
+    +recommendation_data RecommendationData
+  }
+
+  class PredictionSaveResponse {
+    +id str
+    +image_url str
+    +worker_id str
+    +worker_name str
+    +created_at str
+  }
+
+  class StatsResponse {
+    +period str
+    +range StatsRange
+    +total int
+    +by_class dict
+  }
+
+  Router --> MLService
+  Router --> SupabaseService
+  Router --> PredictionResponse
+  Router --> PredictionSaveResponse
+  Router --> StatsResponse

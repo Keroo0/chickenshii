@@ -1,0 +1,20 @@
+graph TD
+  subgraph Perangkat Pengguna
+    A[Mobile App - React Native Expo]
+  end
+
+  subgraph Cloud Backend - Railway atau Render
+    B[Backend FastAPI]
+    C[Model AI - MobileNetV2 .keras]
+    B --> C
+  end
+
+  subgraph Supabase Cloud
+    D[PostgreSQL - Tabel workers dan predictions]
+    E[Storage Bucket - feses-images]
+  end
+
+  A --> B
+  B --> D
+  B --> E
+  A --> D

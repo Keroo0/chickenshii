@@ -1,0 +1,14 @@
+sequenceDiagram
+  participant M as Mobile App
+  participant B as Backend FastAPI
+  participant S as Supabase
+
+  M->>B: POST /api/v1/predictions (gambar + data + worker_id)
+  B->>S: Validasi worker_id di tabel workers
+  S-->>B: Worker valid dan aktif
+  B->>S: Upload gambar ke Storage bucket feses-images
+  S-->>B: URL gambar tersimpan
+  B->>S: INSERT ke tabel predictions
+  S-->>B: Data berhasil disimpan
+  B-->>M: 201 Created - data prediksi tersimpan
+  M->>M: Tampilkan notifikasi sukses

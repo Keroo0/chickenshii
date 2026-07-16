@@ -1,0 +1,17 @@
+graph TD
+  ROOT[app/_layout.tsx - Root Provider] --> HOME[app/index.tsx - Home Pekerja Kandang]
+  ROOT --> GUARD[app/admin/_layout.tsx - Guard Sesi]
+
+  HOME --> STATE_UPLOAD[State Upload - Pilih Foto dan Deteksi]
+  HOME --> STATE_HASIL[State Hasil - Lihat Prediksi dan Simpan]
+  STATE_HASIL --> STATE_UPLOAD
+
+  GUARD --> LOGIN[app/admin/login.tsx - Form Login]
+  GUARD --> TABS[app/admin/tabs - Tab Navigator]
+
+  TABS --> DASHBOARD[index.tsx - Dashboard Statistik]
+  TABS --> HISTORY[history.tsx - Riwayat Prediksi]
+  TABS --> WORKERS[workers.tsx - Kelola Pekerja]
+
+  LOGIN --> TABS
+  GUARD -- Sesi Tidak Valid --> LOGIN

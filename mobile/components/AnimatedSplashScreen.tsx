@@ -96,7 +96,7 @@ export default function AnimatedSplashScreen({
           }}
         >
           <Image
-            source={require("../assets/LOGO CHICKENSHII-nobg.png")}
+            source={require("../assets/logo-chickenshii-nobg.png")}
             style={styles.logo}
             resizeMode="contain"
           />

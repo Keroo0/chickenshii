@@ -95,7 +95,7 @@ export default function HomeScreen() {
         <View className="flex-row items-center justify-between">
           <View className="flex-row items-center gap-2.5">
             <Image
-              source={require("../assets/LOGO CHICKENSHII-nobg.png")}
+              source={require("../assets/logo-chickenshii-nobg.png")}
               className="h-9 w-9"
               resizeMode="contain"
             />
@@ -127,7 +127,7 @@ export default function HomeScreen() {
               {/* Hero */}
               <View className="items-center gap-3 py-6">
                 <Image
-                  source={require("../assets/LOGO CHICKENSHII-nobg.png")}
+                  source={require("../assets/logo-chickenshii-nobg.png")}
                   className="h-28 w-28"
                   resizeMode="contain"
                   accessibilityLabel="Logo ChickenShii"

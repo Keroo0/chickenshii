@@ -1,0 +1,12 @@
+sequenceDiagram
+  participant M as Mobile App
+  participant B as Backend FastAPI
+  participant AI as Model AI
+
+  M->>B: POST /api/v1/predict (gambar)
+  B->>B: Validasi tipe dan ukuran file
+  B->>AI: Inferensi gambar
+  AI-->>B: Probabilitas 4 kelas penyakit
+  B->>B: Lookup Knowledge Base statis
+  B-->>M: JSON hasil prediksi + confidence_threshold
+  M->>M: Tampilkan hasil ke pengguna

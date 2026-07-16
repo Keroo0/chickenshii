@@ -1,0 +1,18 @@
+graph TD
+  A([Mulai]) --> B[Buka Halaman Login]
+  B --> C[Masukkan Email dan Password]
+  C --> D{Login Berhasil?}
+  D -- Tidak --> C
+  D -- Ya --> E[Simpan Token ke Secure Store]
+  E --> F[Masuk Dashboard]
+  F --> G{Pilih Aksi}
+  G --> H[Lihat Statistik]
+  G --> I[Filter dan Cari Riwayat]
+  G --> J[Hapus Riwayat]
+  G --> K[Kelola Pekerja]
+  G --> L[Export CSV]
+  H --> G
+  I --> G
+  J --> G
+  K --> G
+  L --> M([Selesai])

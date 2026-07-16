@@ -1,0 +1,18 @@
+graph TD
+  A([Mulai]) --> B[Buka Aplikasi]
+  B --> C[Pilih Foto Kamera atau Galeri]
+  C --> D[Crop Foto]
+  D --> E{Crop Selesai?}
+  E -- Tidak --> C
+  E -- Ya --> F[Tekan Tombol Deteksi]
+  F --> G[Tampilkan Loading]
+  G --> H[Kirim Gambar ke Backend]
+  H --> I[Tampilkan Hasil Prediksi]
+  I --> J{Aksi Pengguna}
+  J -- Reset --> C
+  J -- Simpan --> K[Pilih Nama Pekerja dari Dropdown]
+  K --> L[Konfirmasi Simpan]
+  L --> M{Simpan Berhasil?}
+  M -- Ya --> N([Selesai])
+  M -- Tidak --> O[Tampilkan Tombol Coba Lagi]
+  O --> L

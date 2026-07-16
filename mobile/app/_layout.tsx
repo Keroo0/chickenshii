@@ -1,8 +1,10 @@
+import "react-native-gesture-handler";
 import "../global.css";
 import { useEffect } from "react";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import * as SplashScreen from 'expo-splash-screen';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { 
   useFonts,
   Outfit_400Regular,
@@ -37,13 +39,13 @@ export default function RootLayout() {
   }
 
   return (
-    <>
+    <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style="dark" />
       {showSplash ? (
         <AnimatedSplashScreen onAnimationComplete={() => setShowSplash(false)} />
       ) : (
         <Stack screenOptions={{ headerShown: false }} />
       )}
-    </>
+    </GestureHandlerRootView>
   );
 }

@@ -18,7 +18,7 @@ export default function AdminLayout() {
     return (
       <View className="flex-1 items-center justify-center bg-white gap-4">
         <Image
-          source={require("../../assets/LOGO CHICKENSHII-nobg.png")}
+          source={require("../../assets/logo-chickenshii-nobg.png")}
           className="h-16 w-16"
           resizeMode="contain"
         />

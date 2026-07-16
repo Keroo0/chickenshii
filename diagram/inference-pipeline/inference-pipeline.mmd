@@ -1,0 +1,12 @@
+graph TD
+  A[Terima File dari POST /api/v1/predict] --> B{Validasi Tipe dan Ukuran}
+  B -- Tidak Valid --> C[Return 413 atau 422]
+  B -- Valid --> D[Baca Bytes dengan Pillow]
+  D --> E[Resize ke 224x224 piksel]
+  E --> F[Konversi ke RGB 3 Channel]
+  F --> G[Normalisasi Piksel 0.0 hingga 1.0]
+  G --> H[Inferensi Model MobileNetV2]
+  H --> I[Output Softmax 4 Kelas Penyakit]
+  I --> J[Ambil Kelas dengan Probabilitas Tertinggi]
+  J --> K[Lookup Knowledge Base Statis]
+  K --> L[Return JSON Hasil Prediksi]

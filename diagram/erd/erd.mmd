@@ -1,0 +1,20 @@
+erDiagram
+  workers {
+    UUID id PK
+    TEXT name
+    BOOLEAN is_active
+    TIMESTAMPTZ created_at
+  }
+
+  predictions {
+    UUID id PK
+    TEXT image_url
+    TEXT prediction
+    FLOAT8 confidence
+    JSONB all_predictions
+    UUID worker_id FK
+    TIMESTAMPTZ deleted_at
+    TIMESTAMPTZ created_at
+  }
+
+  workers ||--o{ predictions : "memiliki"

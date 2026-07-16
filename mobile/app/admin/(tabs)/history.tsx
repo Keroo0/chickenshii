@@ -130,7 +130,7 @@ export default function HistoryScreen() {
         <View className="flex-row items-center justify-between mb-3">
           <View className="flex-row items-center gap-2">
             <Image
-              source={require("../../../assets/LOGO CHICKENSHII-nobg.png")}
+              source={require("../../../assets/logo-chickenshii-nobg.png")}
               className="h-7 w-7"
               resizeMode="contain"
             />

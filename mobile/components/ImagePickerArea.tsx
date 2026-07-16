@@ -4,6 +4,7 @@ import * as ImagePicker from 'expo-image-picker'
 import { Camera, Image } from 'lucide-react-native'
 import { colors, brown } from '../constants/colors'
 import { compressImage } from '../utils/compressImage'
+import CropModal from './CropModal'
 
 interface Props {
   onImageSelect: (asset: ImagePicker.ImagePickerAsset) => void
@@ -15,6 +16,8 @@ const MAX_SIZE = 5 * 1024 * 1024
 
 export default function ImagePickerArea({ onImageSelect, disabled }: Props) {
   const [loading, setLoading] = useState(false)
+  const [cropUri, setCropUri] = useState<string | null>(null)
+  const [pickedAsset, setPickedAsset] = useState<ImagePicker.ImagePickerAsset | null>(null)
 
   const pick = async (source: 'camera' | 'gallery') => {
     if (loading || disabled) return
@@ -36,7 +39,7 @@ export default function ImagePickerArea({ onImageSelect, disabled }: Props) {
     try {
       const result = await launcher({
         mediaTypes: ['images'],
-        allowsEditing: true,
+        allowsEditing: false,
         quality: 0.8,
       })
 
@@ -54,56 +57,81 @@ export default function ImagePickerArea({ onImageSelect, disabled }: Props) {
         return
       }
 
-      const compressedUri = await compressImage(asset.uri)
-      onImageSelect({ ...asset, uri: compressedUri })
+      setPickedAsset(asset)
+      setCropUri(asset.uri)
     } finally {
       setLoading(false)
     }
   }
 
+  const handleCropConfirm = async (croppedUri: string) => {
+    setCropUri(null)
+    const compressedUri = await compressImage(croppedUri)
+    if (pickedAsset) {
+      onImageSelect({ ...pickedAsset, uri: compressedUri })
+    }
+    setPickedAsset(null)
+  }
+
+  const handleCropCancel = () => {
+    setCropUri(null)
+    setPickedAsset(null)
+  }
+
   const busy = loading || disabled
 
   return (
-    <View className="gap-3">
-      <View className="flex-row gap-3">
-        <TouchableOpacity
-          onPress={() => pick('camera')}
-          disabled={busy}
-          activeOpacity={0.7}
-          className="flex-1 flex-col items-center gap-2 rounded-2xl border-[1.5px] border-brown bg-brown/5 px-4 py-5"
-        >
-          {busy ? (
-            <ActivityIndicator color={brown.DEFAULT} />
-          ) : (
-            <Camera size={28} color={brown.DEFAULT} />
-          )}
-          <Text className="text-sm font-outfit_bold text-brown">
-            Ambil Foto
-          </Text>
-          <Text className="text-xs text-brown/60">Kamera</Text>
-        </TouchableOpacity>
+    <>
+      <View className="gap-3">
+        <View className="flex-row gap-3">
+          <TouchableOpacity
+            onPress={() => pick('camera')}
+            disabled={busy}
+            activeOpacity={0.7}
+            className="flex-1 flex-col items-center gap-2 rounded-2xl border-[1.5px] border-brown bg-brown/5 px-4 py-5"
+          >
+            {busy ? (
+              <ActivityIndicator color={brown.DEFAULT} />
+            ) : (
+              <Camera size={28} color={brown.DEFAULT} />
+            )}
+            <Text className="text-sm font-outfit_bold text-brown">
+              Ambil Foto
+            </Text>
+            <Text className="text-xs text-brown/60">Kamera</Text>
+          </TouchableOpacity>
 
-        <TouchableOpacity
-          onPress={() => pick('gallery')}
-          disabled={busy}
-          activeOpacity={0.7}
-          className="flex-1 flex-col items-center gap-2 rounded-2xl border-[1.5px] border-healthy bg-healthy/5 px-4 py-5"
-        >
-          {busy ? (
-            <ActivityIndicator color={colors.healthy} />
-          ) : (
-            <Image size={28} color={colors.healthy} />
-          )}
-          <Text className="text-sm font-outfit_bold text-healthy">
-            Dari Galeri
-          </Text>
-          <Text className="text-xs text-healthy/60">Galeri</Text>
-        </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => pick('gallery')}
+            disabled={busy}
+            activeOpacity={0.7}
+            className="flex-1 flex-col items-center gap-2 rounded-2xl border-[1.5px] border-healthy bg-healthy/5 px-4 py-5"
+          >
+            {busy ? (
+              <ActivityIndicator color={colors.healthy} />
+            ) : (
+              <Image size={28} color={colors.healthy} />
+            )}
+            <Text className="text-sm font-outfit_bold text-healthy">
+              Dari Galeri
+            </Text>
+            <Text className="text-xs text-healthy/60">Galeri</Text>
+          </TouchableOpacity>
+        </View>
+
+        <Text className="text-center text-xs text-neutral-muted">
+          Maksimal 5MB · Format JPG/PNG · Khusus foto feses ayam
+        </Text>
       </View>
 
-      <Text className="text-center text-xs text-neutral-muted">
-        Maksimal 5MB · Format JPG/PNG · Khusus foto feses ayam
-      </Text>
-    </View>
+      {cropUri && (
+        <CropModal
+          visible={!!cropUri}
+          uri={cropUri}
+          onConfirm={handleCropConfirm}
+          onCancel={handleCropCancel}
+        />
+      )}
+    </>
   )
 }
