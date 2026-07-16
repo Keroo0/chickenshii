@@ -49,10 +49,8 @@ mobile/scratch.js
 *.p12
 
 # ML models
-*.keras
 *.h5
 *.hdf5
-models/
 
 # Logs
 *.log
