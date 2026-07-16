@@ -48,9 +48,8 @@ mobile/scratch.js
 *.jks
 *.p12
 
-# ML models
-*.h5
-*.hdf5
+# ML models (large ones only)
+# *.keras — included for deploy (21MB, OK for GitHub)
 
 # Logs
 *.log

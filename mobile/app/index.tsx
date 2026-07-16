@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { View, Text, ScrollView, Pressable, Image } from "react-native";
 import { ImagePickerAsset } from "expo-image-picker";
-import { Bird, Camera, Scan, ClipboardCheck, LogIn, AlertTriangle, Sparkles } from "lucide-react-native";
+import { Bird, Camera, Scan, ClipboardCheck, LogIn, AlertTriangle, Sparkles, Settings } from "lucide-react-native";
 import { StatusBar } from "expo-status-bar";
 import { Link, useRouter } from "expo-router";
 
@@ -106,6 +106,11 @@ export default function HomeScreen() {
           </View>
           <View className="flex-row items-center gap-3">
 
+            <Link href="/settings" asChild>
+              <Pressable className="h-8 w-8 items-center justify-center rounded-full bg-neutral-muted-soft">
+                <Settings size={16} color={colors.foreground} />
+              </Pressable>
+            </Link>
             <Link href="/admin/login" asChild>
               <Pressable className="h-8 w-8 items-center justify-center rounded-full bg-neutral-muted-soft">
                 <LogIn size={16} color={colors.foreground} />

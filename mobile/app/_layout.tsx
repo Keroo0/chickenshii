@@ -14,6 +14,7 @@ import {
 } from '@expo-google-fonts/outfit';
 import { useState } from "react";
 import AnimatedSplashScreen from "../components/AnimatedSplashScreen";
+import { loadSavedApiUrl } from "../services/api";
 
 // Keep the splash screen visible while we fetch resources
 SplashScreen.preventAutoHideAsync();
@@ -29,8 +30,8 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (loaded || error) {
-      // Sembunyikan native splash screen segera setelah font siap
-      SplashScreen.hideAsync();
+      // Load saved API URL, then hide splash
+      loadSavedApiUrl().finally(() => SplashScreen.hideAsync());
     }
   }, [loaded, error]);
 
