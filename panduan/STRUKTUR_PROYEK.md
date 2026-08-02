@@ -1,75 +1,112 @@
 # Struktur Proyek ChickenShii
 
-Dokumen ini menjelaskan arsitektur folder dan fungsi dari setiap file utama penyusun sistem **ChickenShii**, baik dari sisi *Backend* (server pemroses data & AI) maupun *Frontend* (aplikasi mobile).
-
----
-
-## 1. Backend (FastAPI + Python)
-Terletak di direktori `backend/`. Modul ini bertugas menerima permintaan HTTP, melakukan prapemrosesan citra, menjalankan inferensi model Deep Learning, serta berinteraksi dengan layanan cloud Supabase.
+Dokumen ini mencatat struktur yang relevan dengan aplikasi empat role. Folder dependency, cache, build, dan file instruksi tooling tidak ditampilkan.
 
 ```text
-backend/
-├── app/                      # Source code utama aplikasi Backend
-│   ├── api/
-│   │   └── routes.py         # Endpoint API (misal: POST /predict, POST /predictions, GET /stats)
-│   ├── core/
-│   │   └── config.py         # Konfigurasi sistem dan env variables (Settings menggunakan Pydantic v2)
-│   ├── models/
-│   │   └── schemas.py        # Definisi struktur data (Schema) untuk request dan response JSON (Pydantic Models)
+chikenshii/
+├── backend/
+│   ├── app/
+│   │   ├── main.py
+│   │   ├── api/
+│   │   │   ├── routes.py
+│   │   │   └── workflow_routes.py
+│   │   ├── core/config.py
+│   │   ├── models/
+│   │   │   ├── schemas.py
+│   │   │   └── workflow_schemas.py
+│   │   ├── services/
+│   │   │   ├── ml_service.py
+│   │   │   ├── supabase_service.py
+│   │   │   └── workflow_service.py
+│   │   └── utils/knowledge_base.py
+│   ├── model/
+│   └── tests/
+├── mobile/
+│   ├── app/
+│   │   ├── _layout.tsx
+│   │   ├── index.tsx
+│   │   ├── result.tsx
+│   │   ├── login.tsx
+│   │   ├── admin/
+│   │   │   ├── _layout.tsx
+│   │   │   ├── login.tsx
+│   │   │   └── (tabs)/
+│   │   │       ├── _layout.tsx
+│   │   │       ├── index.tsx
+│   │   │       ├── history.tsx
+│   │   │       └── workers.tsx
+│   │   ├── doctor/
+│   │   │   ├── _layout.tsx
+│   │   │   └── (tabs)/
+│   │   │       ├── _layout.tsx
+│   │   │       ├── index.tsx
+│   │   │       └── history.tsx
+│   │   └── head-worker/
+│   │       ├── _layout.tsx
+│   │       └── (tabs)/
+│   │           ├── _layout.tsx
+│   │           ├── index.tsx
+│   │           └── follow-ups.tsx
+│   ├── components/
+│   │   ├── RoleGuard.tsx
+│   │   └── workflow/
+│   │       ├── FollowUpActionPanel.tsx
+│   │       ├── StaffScreenHeader.tsx
+│   │       ├── ValidationModal.tsx
+│   │       ├── WorkflowCaseCard.tsx
+│   │       ├── WorkflowCaseDetails.tsx
+│   │       ├── WorkflowDetailModal.tsx
+│   │       ├── WorkflowStateView.tsx
+│   │       └── WorkflowStatusBadge.tsx
+│   ├── providers/AuthProvider.tsx
 │   ├── services/
-│   │   ├── ml_service.py     # Logika Machine Learning: Load model .keras, preprocessing gambar, dan inferensi
-│   │   └── supabase_service.py # Logika komunikasi dengan Supabase (Auth admin, CRUD tabel predictions & workers)
+│   │   ├── api.ts
+│   │   ├── staffApi.ts
+│   │   ├── supabase.ts
+│   │   └── workflow.ts
+│   ├── types/workflow.ts
 │   ├── utils/
-│   │   └── knowledge_base.py # Basis pengetahuan statis yang memuat info penyakit, penyebab, dan penanganan
-│   └── main.py               # Entry point FastAPI, inisialisasi aplikasi, dan konfigurasi middleware CORS
-├── model/
-│   └── mobilenetv2_finetuned_best.keras # File model Deep Learning yang sudah dilatih (Pre-trained Model)
-├── tests/
-│   └── test_whitebox.py      # Script unit testing untuk pengujian struktural (White Box Testing)
-├── .env                      # File kredensial lokal (Supabase URL, API Keys)
-├── requirements.txt          # Daftar dependensi library Python yang dibutuhkan
-├── run.py                    # Script runner alternatif untuk menjalankan server Uvicorn
-└── Dockerfile                # Konfigurasi containerization untuk deployment (opsional)
+│   │   ├── apiSecurity.ts
+│   │   ├── auth.ts
+│   │   ├── staffAccount.ts
+│   │   └── workflow.ts
+│   └── tests/
+├── supabase/
+│   └── migrations/
+│       └── 20260802090000_add_staff_workflow.sql
+├── diagram/
+├── panduan/
+└── result/
 ```
 
----
+## Backend
 
-## 2. Frontend / Mobile (React Native + Expo + NativeWind)
-Terletak di direktori `mobile/`. Modul ini merupakan aplikasi *client-side* yang dipasang di perangkat HP pengguna (peternak & admin). Dibangun menggunakan *Expo Router* untuk navigasi berbasis file.
+- `routes.py`: health, inference, penyimpanan prediksi, statistik Admin, dan pembuatan akun staf.
+- `workflow_routes.py`: empat endpoint Dokter dan lima endpoint Kepala Pekerja.
+- `workflow_schemas.py`: tipe verdict, status, filter, dan response workflow.
+- `workflow_service.py`: query antrean/riwayat/dashboard, label efektif, rekomendasi, pagination, dan transisi.
+- `supabase_service.py`: validasi Auth/role serta provisioning akun Auth + `staff_profiles`.
 
-```text
-mobile/
-├── app/                      # Direktori utama routing (Expo Router)
-│   ├── admin/                # Routing khusus untuk fitur Admin Dasbor
-│   │   ├── (tabs)/           # Navigasi tab bawah untuk Admin (Overview, Riwayat, Pekerja)
-│   │   │   ├── _layout.tsx   # Konfigurasi ikon dan warna bottom tabs admin
-│   │   │   ├── history.tsx   # Halaman riwayat deteksi (menampilkan daftar lengkap dengan fitur hapus)
-│   │   │   ├── index.tsx     # Halaman Dasbor utama (menampilkan LineChart dan metrik agregat penyakit)
-│   │   │   └── workers.tsx   # Halaman manajemen daftar pekerja lapangan
-│   │   ├── _layout.tsx       # Konfigurasi stack layout khusus rute admin
-│   │   └── login.tsx         # Halaman autentikasi Admin menggunakan Supabase Auth
-│   ├── _layout.tsx           # Entry point Root Layout untuk seluruh aplikasi mobile
-│   ├── index.tsx             # Halaman Beranda Pekerja (Kamera/Galeri, Deteksi, Error Modal)
-│   ├── result.tsx            # Halaman Hasil Prediksi (menampilkan Chart, informasi klinis, simpan data)
-│   └── settings.tsx          # Halaman pengaturan preferensi aplikasi
-├── components/               # Komponen UI modular yang dapat digunakan kembali (Reusable Components)
-│   ├── ErrorModal.tsx        # Modal pop-up pesan galat dengan gaya desain modern (shadcn-ui style)
-│   ├── ConfidenceBarChart.tsx# Komponen diagram batang untuk distribusi persentase kelas penyakit
-│   ├── HistoryListItem.tsx   # Komponen kartu item tunggal pada daftar riwayat admin
-│   ├── UploadedImageCard.tsx # Komponen pratinjau gambar feses yang diunggah
-│   └── ...                   # Komponen visual lainnya (Banner, Cards, Overlays)
-├── constants/
-│   └── colors.ts             # Definisi token warna desain (Palet warna identitas merek & penyakit)
-├── services/
-│   ├── api.ts                # Konfigurasi Axios/Fetch untuk menembak endpoint Backend FastAPI
-│   └── supabase.ts           # Inisialisasi client Supabase untuk otentikasi di aplikasi mobile
-├── types/
-│   └── index.ts              # Definisi interface TypeScript (tipe data HistoryItem, Worker, dll)
-├── utils/
-│   ├── compressImage.ts      # Helper function untuk mengecilkan ukuran gambar sebelum dikirim
-│   └── diseaseInfo.ts        # Duplikasi frontend untuk data referensi klinis penyakit
-├── assets/                   # Aset statis (Logo ChickenShii, gambar placeholder, ikon)
-├── global.css                # File import utama Tailwind CSS / NativeWind
-├── tailwind.config.js        # Konfigurasi styling Tailwind (mendefinisikan custom colors/fonts)
-└── app.json                  # Konfigurasi manifest proyek Expo (Nama aplikasi, versi, orientasi layar)
-```
+## Mobile
+
+- `app/login.tsx` adalah form login bersama. `app/admin/login.tsx` dipertahankan sebagai redirect kompatibilitas.
+- `AuthProvider`, `RoleGuard`, dan `utils/auth.ts` menyediakan session serta pemetaan role ke route.
+- `services/api.ts` adalah client anonim untuk deteksi/penyimpanan pekerja dan dapat diarahkan ke URL khusus tanpa pernah membaca sesi staf.
+- `services/staffApi.ts` selalu memakai `API_URL` bawaan dan hanya memasang Bearer token bila origin tujuan sama persis; `utils/apiSecurity.ts` menolak tujuan asing dan URL tidak valid.
+- Tab Admin `workers.tsx` sekarang berlabel `Pengguna` dan memuat dua segmen: pekerja kandang serta akun staf.
+- Route `/doctor` sudah memuat tepat dua tab fisik, `Validasi` (`index.tsx`) dan `Riwayat` (`history.tsx`).
+- Route `/head-worker` sudah memuat tepat dua tab fisik, `Dashboard` (`index.tsx`) dan `Tindak Lanjut` (`follow-ups.tsx`).
+- `components/workflow/` menyediakan kartu/detail kasus, status, state loading/empty/error, modal validasi, dan panel aksi tindak lanjut yang digunakan bersama. Detail/form tetap berupa modal, bukan route atau tab tambahan.
+- `services/workflow.ts`, `types/workflow.ts`, dan `utils/workflow.ts` menyediakan endpoint melalui `staffApi`, kontrak tipe, pemetaan error, format data, dan aturan ketersediaan aksi.
+
+## Database
+
+Migration workflow membuat `staff_profiles`, `prediction_validations`, dan `prediction_followups`, trigger pembuatan follow-up penyakit, constraint transisi, policy Admin khusus, privilege service role, dan bootstrap existing Auth users menjadi Admin.
+
+## Diagram
+
+Folder `diagram/` memakai satu file Markdown bernama `penjelasan diagram <nama>.md` per diagram sebagai petunjuk menggambar di Visual Paradigm Online. File Mermaid dan aset `.drawio` lama sudah dihapus; panduan Markdown tersebut menjadi satu-satunya sumber diagram.
+
+## Catatan status struktur
+
+Dokumen PRD/SRS/SDD menjelaskan kontrak akhir fitur. Struktur di atas mengikuti file aktual setelah layar Dokter dan Kepala Pekerja diimplementasikan. Status pengujian aktual tetap dicatat terpisah pada `HASIL_PENGUJIAN.md`.

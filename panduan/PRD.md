@@ -1,123 +1,143 @@
-Product Requirements Document (PRD)
+# Product Requirements Document (PRD)
 
-Sistem Deteksi Dini Penyakit Ayam Petelur Berbasis Citra Feses (ChickenShii)
+## 1. Tujuan produk
 
-1. Tujuan Produk
+ChickenShii adalah aplikasi mobile untuk deteksi dini penyakit ayam petelur dari citra feses. Model MobileNetV2 menghasilkan dugaan awal empat kelas, sedangkan manusia menjalankan validasi dan tindak lanjut. Produk merupakan Decision Support System dan tidak menggantikan diagnosis dokter hewan.
 
-Sistem ini adalah aplikasi mobile yang dibangun menggunakan React Native (Expo), difungsikan untuk deteksi dini penyakit ayam petelur (layer) di PT Nirwana Farm menggunakan citra kotoran (feses). Sistem memanfaatkan model deep learning MobileNetV2 fine-tuned (akurasi target/baseline 95%).
+Nilai utama produk:
 
-Nilai Utama (Core Value): Sistem ini bertindak sebagai alat bantu (Decision Support System) untuk memberikan dugaan awal guna mempercepat tindakan preventif peternak. Sistem ini bukan sebagai pengganti diagnosis dokter hewan.
+- membantu Pekerja Kandang melakukan pemeriksaan rutin dengan cepat;
+- memastikan ayam yang terindikasi penyakit segera dipisahkan;
+- memberi ruang validasi profesional kepada Dokter Hewan;
+- mencatat progres penanganan oleh Kepala Pekerja;
+- mempertahankan fungsi pengawasan data bagi Admin tanpa membuka data medis/operasional lintas role.
 
-2. Batasan Teknologi (Tech Stack Constraints)
+## 2. Batasan teknologi
 
-Frontend: React Native, dikembangkan menggunakan Expo (managed workflow). Navigasi menggunakan Expo Router (file-based routing). Styling menggunakan NativeWind (Tailwind CSS untuk React Native). Dilarang eject dari Expo (bare workflow) tanpa alasan teknis yang kuat, guna menjaga kemudahan build lintas platform (Android/iOS).
+- Mobile memakai React Native, Expo managed workflow, Expo Router, dan NativeWind.
+- Backend memakai FastAPI sebagai REST API serta menjalankan preprocessing dan MobileNetV2.
+- Supabase dipakai untuk PostgreSQL, Auth, dan Storage.
+- Role otorisasi disimpan di `app_metadata` Supabase Auth.
+- Rekomendasi berasal dari knowledge base statis; tidak menggunakan LLM generatif.
+- Foto JPG/JPEG/PNG maksimal 5 MB dan preprocessing 224×224 dilakukan backend.
 
-Backend: FastAPI (Python), digunakan murni sebagai REST API.
+## 3. Pengguna dan hak akses
 
-Database & Storage: Supabase.
+### 3.1 Pekerja Kandang
 
-3. Pengguna (User Roles)
+Tidak login. Dapat mengambil/memilih satu foto, melakukan crop, menjalankan deteksi, melihat kelas/confidence/probabilitas, deskripsi, penyebab, rekomendasi, disclaimer, dan menyimpan hasil dengan memilih pekerja aktif dari dropdown.
 
-Sistem ini membatasi akses pada dua jenis pengguna untuk menjaga scope proyek:
+### 3.2 Admin/Pemilik
 
-Pekerja Kandang:
+Login melalui `/login` lalu diarahkan ke `/admin`. Dapat:
 
-Tidak memerlukan autentikasi (login). Role ini merepresentasikan staf kandang di PT Nirwana Farm yang menjalankan pengecekan harian.
+- melihat dashboard statistik;
+- mencari, memfilter, dan soft delete riwayat prediksi;
+- export CSV prediksi;
+- mengelola pekerja kandang lama;
+- membuat akun staf dengan nama, email, role, dan password sementara.
 
-Dapat mengunggah foto feses ayam (single image) via kamera atau galeri perangkat.
+Tab `Pekerja` berubah menjadi `Pengguna` dan menggabungkan pengelolaan pekerja dengan pembuatan akun `veterinarian`/`head_worker`. Admin tidak melihat validasi atau tindak lanjut dan data tersebut tidak masuk export CSV.
 
-Melihat hasil prediksi kelas penyakit, confidence score, dan probabilitas seluruh kelas.
+### 3.3 Dokter Hewan
 
-Membaca deskripsi singkat penyakit dan rekomendasi awal (berbasis static knowledge base).
+Login melalui `/login` lalu diarahkan ke `/doctor`. Area Dokter memiliki tepat dua tab:
 
-Melihat disclaimer medis.
+1. `Validasi`: antrean bersama prediksi penyakit yang belum divalidasi.
+2. `Riwayat`: hanya validasi milik dokter yang sedang login.
 
-Admin (Pemilik Farm):
+Dokter memilih `Sesuai`, `Tidak sesuai`, atau `Tidak dapat dipastikan`. Pilihan tidak sesuai wajib menyertakan label koreksi yang berbeda dari label AI, sedangkan catatan opsional. Dokter pembuat dapat mengedit sebelum penanganan dimulai. Detail/form tampil sebagai modal.
 
-Memerlukan autentikasi (login) via Supabase Auth.
+### 3.4 Kepala Pekerja
 
-Memiliki seluruh kapabilitas Pekerja Kandang.
+Login melalui `/login` lalu diarahkan ke `/head-worker`. Area Kepala Pekerja memiliki tepat dua tab:
 
-Mengakses dashboard statistik — menampilkan total prediksi serta jumlah/distribusi hasil per kelas penyakit (Coccidiosis, Healthy, New Castle Disease, Salmonellosis), dengan filter periode Mingguan, Bulanan, atau Tahunan.
+1. `Dashboard`: kasus hari ini, belum dipisahkan, masih menunggu validasi, dan penanganan aktif.
+2. `Tindak Lanjut`: konfirmasi `Sudah dipisahkan`, `Mulai penanganan`, dan `Penanganan selesai`.
 
-Meninjau riwayat prediksi di tabel database, dengan kemampuan mencari dan memfilter (berdasarkan nama Pekerja Kandang, kelas penyakit, dan rentang tanggal), serta menghapus entri riwayat (soft delete — entri disembunyikan dari tampilan, bukan dihapus permanen dari database).
+Detail dan konfirmasi tampil melalui modal.
 
-Mengelola daftar Pekerja Kandang — menambahkan nama pekerja baru dan menonaktifkan pekerja yang sudah tidak bertugas, agar nama yang dipilih saat proses Simpan selalu konsisten dan tidak diketik bebas.
+## 4. Fitur produk
 
-Mengunduh (export) data prediksi dalam format CSV untuk keperluan penelitian lanjutan.
+### P0 — deteksi dan penyimpanan
 
-4. Fitur Utama (Core Features)
+- Kamera/galeri, crop, preview, dan validasi file.
+- Loading yang memblokir submit ganda.
+- Hasil berisi foto, kelas, confidence, probabilitas, deskripsi, penyebab, rekomendasi, low-confidence warning, dan disclaimer.
+- Reset untuk mengulang.
+- Simpan melalui modal pekerja aktif; kegagalan menyimpan mempertahankan state dan menyediakan retry.
 
-P0 (Wajib Ada - Core Flow)
+### P0 — autentikasi dan otorisasi staf
 
-Upload & Crop Foto: Fungsionalitas bagi Pekerja Kandang untuk mengambil/memilih satu gambar feses via expo-image-picker (kamera atau galeri). Setelah foto dipilih, sistem langsung membuka native crop tool (allowsEditing: true) agar pengguna bisa mengotak-kan sendiri bagian feses yang relevan sebelum lanjut — pola interaksi yang sama seperti saat memasang foto profil. Validasi format JPG/PNG/JPEG dan maksimal 5MB tetap dilakukan terhadap hasil crop.
+- Satu form `/login` untuk seluruh staf.
+- Redirect berbasis `app_metadata.role`: `admin` → `/admin`, `veterinarian` → `/doctor`, `head_worker` → `/head-worker`.
+- Role kosong/tidak dikenal ditolak dan logout.
+- Route guard dan backend menolak akses lintas role.
+- Token dikirim sebagai Bearer token pada API terlindungi.
 
-Indikator Loading: UI wajib memblokir interaksi (modal/overlay) dan menampilkan status loading yang jelas saat inference model berjalan (mengingat potensi cold start server).
+### P0 — workflow penyakit
 
-Layar Hasil Prediksi: Setelah inference selesai, sistem menampilkan hasil dalam susunan kartu berikut secara berurutan:
+- Endpoint simpan menolak label di luar empat kelas model dengan `422`. Trigger hanya membuat follow-up untuk `predictions` baru berlabel `Coccidiosis`, `New Castle Disease`, atau `Salmonellosis`; `Healthy` tidak membuat follow-up.
+- Data lama tidak di-backfill.
+- Kepala Pekerja boleh dan wajib mencatat pemisahan segera setelah deteksi penyakit, tanpa menunggu dokter.
+- Satu prediksi hanya memiliki satu validasi; request pertama menang saat terjadi kompetisi.
+- Validasi `matching` memastikan label AI; `incorrect` memakai label koreksi; `uncertain` menandai perlu pemeriksaan lebih lanjut.
+- Penanganan hanya bisa dimulai setelah ayam dipisahkan dan validasi definitif memastikan penyakit.
+- Koreksi menjadi `Healthy` menutup kasus otomatis.
+- Penanganan tidak dapat dimulai untuk `uncertain`.
+- Rekomendasi selalu tersedia dan mengikuti label efektif dokter setelah koreksi.
 
-1. Foto hasil crop yang diupload.
+### P1 — Admin dan data
 
-2. Akurasi/Confidence prediksi penyakit — nama kelas penyakit terprediksi (Coccidiosis, Healthy, New Castle Disease, Salmonellosis) beserta persentase confidence, dan bar chart distribusi probabilitas keempat kelas (menggunakan library chart yang kompatibel React Native, contoh react-native-chart-kit atau victory-native — Recharts tidak kompatibel di RN). Jika confidence utama berada di bawah ambang batas 60%, tampilkan catatan tambahan yang mengingatkan bahwa hasil kurang meyakinkan dan disarankan mengambil ulang foto dengan pencahayaan/framing yang lebih baik.
+- Statistik mingguan, bulanan, dan tahunan.
+- Riwayat dengan pencarian/filter, soft delete, serta preview gambar.
+- Manajemen pekerja aktif/nonaktif.
+- Pembuatan akun staf; email duplikat ditolak.
+- CSV hanya untuk prediksi yang terlihat bagi Admin.
 
-3. Card Penjelasan Penyakit — deskripsi singkat penyakit yang terdeteksi, bersumber dari data statis (diseaseInfo.ts).
+## 5. User flow
 
-4. Card Penyebab Penyakit — etiologi/faktor penyebab penyakit tersebut, juga dari data statis.
+### Pekerja Kandang
 
-5. Card Rekomendasi Penanganan Awal — langkah-langkah tindakan awal yang disarankan.
+`Home → pilih/crop foto → Deteksi → Hasil → Reset atau Simpan → pilih nama pekerja → tersimpan`.
 
-Seluruh isi knowledge base (deskripsi, penyebab, rekomendasi) bersumber dari data statis. Dilarang menggunakan LLM generatif untuk fitur ini guna menghindari latensi dan halusinasi informasi medis.
+Jika prediksi tersimpan merupakan penyakit baru, trigger database otomatis membuat follow-up. Jika hasil `Healthy`, alur berhenti tanpa workflow.
 
-Tombol Reset/Ulangi: Mengosongkan state hasil prediksi dan foto, mengembalikan pengguna ke layar upload untuk mencoba foto lain.
+### Login staf
 
-Tombol Simpan: Memicu modal pilih nama pengambil gambar, berupa dropdown berisi daftar Pekerja Kandang aktif (bukan input teks bebas). Setelah nama dipilih dan dikonfirmasi, sistem mengirim gambar, hasil prediksi, dan referensi pekerja tersebut ke backend untuk disimpan permanen. Tanpa menekan tombol ini, hasil prediksi bersifat sementara dan tidak tercatat ke riwayat. Apabila proses simpan gagal (misal koneksi terputus), sistem menampilkan pesan error beserta tombol "Coba Lagi" yang mengulang pengiriman tanpa perlu mengulang proses crop maupun deteksi dari awal.
+`/login → Supabase Auth → baca app_metadata.role → redirect area role`. Kegagalan token atau role mengakhiri sesi dan menampilkan error.
 
-Disclaimer Medis: Peringatan permanen yang tegas di UI bahwa hasil adalah dugaan awal AI, bukan diagnosis final dokter hewan. Selalu tampil di Layar Hasil Prediksi, tidak boleh disembunyikan.
+### Dokter Hewan
 
-P1 (Sebaiknya Ada - Data & Admin)
+`Validasi → buka modal kasus → pilih verdict/koreksi/catatan → simpan → kasus hilang dari antrean → muncul pada Riwayat dokter pembuat`.
 
-Pencatatan Riwayat (Database): Penyimpanan gambar ke Storage dan pencatatan hasil prediksi ke Database (Supabase) terjadi hanya ketika Pekerja Kandang menekan tombol Simpan dan memilih nama pengambil gambar dari dropdown. Setiap entri riwayat menyimpan referensi ke pekerja tersebut sebagai atribut worker_id (relasi ke tabel workers), bukan teks bebas.
+Edit dari Riwayat hanya tersedia bagi pembuat dan sebelum `treatment_started_at` terisi.
 
-Dashboard Admin: Layar tertutup (protected screen) yang menampilkan daftar riwayat seluruh prediksi (FlatList) beserta thumbnail gambar, hasil, nama pekerja, dan timestamp.
+### Kepala Pekerja
 
-Pencarian & Filter Riwayat: Pada daftar riwayat di Dashboard Admin, tersedia kolom pencarian dan filter — berdasarkan nama Pekerja Kandang, kelas penyakit, dan rentang tanggal. Fitur ini terpisah dari filter periode pada Statistik (lihat di bawah); yang satu memfilter isi daftar/tabel, yang satu mengagregasi jumlah untuk chart.
+`Dashboard/Tindak Lanjut → buka modal kasus → Sudah dipisahkan → tunggu validasi definitif → Mulai penanganan → Penanganan selesai`.
 
-Hapus Riwayat Prediksi: Admin dapat menghapus entri riwayat dari daftar. Penghapusan bersifat soft delete — entri ditandai tersembunyi (tidak tampil lagi di daftar riwayat, statistik, maupun export CSV) tanpa benar-benar menghapus barisnya dari database, sehingga masih bisa dipulihkan bila diperlukan.
+Jika dokter mengoreksi ke `Healthy`, kasus tertutup otomatis. Jika dokter memilih tidak pasti, tombol mulai dinonaktifkan dan UI menampilkan kebutuhan pemeriksaan lanjutan.
 
-Manajemen Pekerja Kandang: Admin dapat menambahkan nama Pekerja Kandang baru dan menonaktifkan pekerja yang sudah tidak bertugas. Pekerja yang dinonaktifkan tidak lagi muncul di dropdown pemilihan nama saat Pekerja Kandang menekan Simpan, namun riwayat prediksi miliknya di masa lalu tetap utuh dan tetap menampilkan namanya.
+### Admin
 
-Statistik Jumlah Penyakit Terdeteksi: Menampilkan jumlah kasus per kelas penyakit (Coccidiosis, Healthy, New Castle Disease, Salmonellosis) dalam bentuk chart, dengan filter periode: Mingguan (7 hari terakhir dari minggu berjalan), Bulanan (per bulan kalender), dan Tahunan (per tahun kalender). Admin dapat berpindah periode lewat segmented control/dropdown, dan (untuk Bulanan/Tahunan) memilih bulan atau tahun spesifik.
+`Dashboard/Riwayat/Pengguna → analisis prediksi, kelola pekerja, atau buat akun staf`. Admin tidak memiliki alur untuk membuka validasi/tindak lanjut.
 
-P2 (Nice to Have)
+## 6. Aturan tetap dan di luar scope
 
-Export CSV Admin: Fitur untuk mengunduh seluruh data riwayat prediksi, memanfaatkan expo-file-system untuk generate file dan expo-sharing untuk membagikan/menyimpan file tersebut di perangkat (tidak ada mekanisme "download browser" di mobile).
+- Tidak ada halaman profil untuk role baru.
+- Tidak ada notifikasi push.
+- Tidak ada identitas ayam atau identitas kandang.
+- Admin tidak menyediakan reset password maupun aktivasi/nonaktivasi akun staf, sistem tidak mewajibkan penggantian password sementara, dan halaman login tidak menyediakan alur reset password mandiri.
+- Workflow tidak mengevaluasi akurasi seluruh kelas karena hanya prediksi penyakit yang divalidasi.
+- Rekomendasi penanganan awal tetap ada seperti sebelum penambahan role.
 
-Dark Mode: Dukungan tema gelap untuk aplikasi, memanfaatkan dukungan dark mode bawaan NativeWind.
+## 7. Kriteria penerimaan
 
-5. Alur Pengguna (User Flow)
-
-Flow Pekerja Kandang:
-
-Akses & Upload: User membuka aplikasi (screen Home / app/index.tsx). Sistem menampilkan area upload dengan opsi kamera atau galeri.
-
-Crop & Validasi: User memilih/mengambil foto, lalu native crop tool otomatis terbuka agar user bisa mengotak-kan bagian feses yang ingin dianalisis. Aplikasi memvalidasi format dan ukuran hasil crop. Jika valid, preview ditampilkan. Jika tidak, munculkan error toast/alert.
-
-Proses Inference: User menekan tombol "Deteksi". Sistem menampilkan overlay loading. Data gambar hasil crop dikirim melalui POST /api/v1/predict ke backend (khusus inference, belum tersimpan).
-
-Layar Hasil: Backend merespons dengan JSON. Aplikasi merender: foto yang diupload, akurasi/confidence prediksi, Card Penjelasan Penyakit, Card Penyebab Penyakit, Card Rekomendasi Penanganan Awal, dan Disclaimer — diikuti tombol Reset/Ulangi dan Simpan di bagian bawah.
-
-Reset atau Simpan:
-
-Jika user menekan Reset/Ulangi, state dikosongkan dan user kembali ke layar upload.
-
-Jika user menekan Simpan, muncul modal berisi dropdown daftar Pekerja Kandang aktif. Setelah nama dipilih dan dikonfirmasi, aplikasi mengirim gambar, hasil prediksi, dan worker_id terpilih melalui POST /api/v1/predictions ke backend untuk disimpan ke Storage dan Database. Data ini kemudian akan muncul di halaman Riwayat pada Dashboard Admin. Jika pengiriman gagal, aplikasi menampilkan tombol "Coba Lagi" tanpa mengembalikan user ke layar upload — gambar dan hasil prediksi yang sudah ada tetap dipertahankan di state.
-
-Flow Admin:
-
-Login: Admin membuka screen app/admin/login.tsx dan memasukkan kredensial.
-
-Dashboard: Setelah sukses, navigasi mengarahkan ke screen app/admin/index.tsx (protected) yang secara otomatis memuat (fetch) data statistik dan riwayat dari Supabase.
-
-Manajemen Riwayat: Admin dapat mencari/memfilter baris data riwayat (nama pekerja, kelas penyakit, rentang tanggal), menekan gambar untuk memperbesar (modal), menghapus entri riwayat tertentu (soft delete, dengan konfirmasi sebelum eksekusi), dan menekan tombol Export CSV untuk membagikan/menyimpan log data ke perangkat.
-
-Manajemen Pekerja Kandang: Dari Dashboard, Admin dapat membuka layar/section pengelolaan daftar Pekerja Kandang untuk menambahkan nama baru atau menonaktifkan pekerja yang sudah tidak bertugas.
+- Pekerja anonim tetap dapat menyelesaikan alur deteksi lama.
+- Ketiga role staf diarahkan dengan benar dan akses lintas role ditolak.
+- Dokter dan Kepala Pekerja masing-masing hanya mempunyai dua tab.
+- Admin saja yang dapat membuat akun staf.
+- Healthy dan data lama tidak muncul di workflow.
+- Aturan validasi, pemisahan, gating penanganan, ketidakpastian, koreksi Healthy, dan penyelesaian ditegakkan backend/database, bukan hanya UI.
+- Admin tidak melihat atau mengekspor data workflow.

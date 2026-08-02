@@ -1,298 +1,166 @@
-<div align="center">
+# ChickenShii
 
-# 🐔 ChickenShii
+ChickenShii adalah sistem pendukung keputusan untuk deteksi dini penyakit ayam petelur melalui citra feses. Model MobileNetV2 mengklasifikasikan citra ke dalam `Coccidiosis`, `Healthy`, `New Castle Disease`, atau `Salmonellosis`. Hasil AI merupakan dugaan awal, bukan diagnosis final; kasus penyakit baru diteruskan ke dokter hewan dan kepala pekerja melalui workflow operasional.
 
-### Sistem Deteksi Dini Penyakit Ayam Petelur Berbasis AI
+## Peran dan akses
 
-**Aplikasi mobile & backend AI untuk klasifikasi penyakit ayam petelur
-melalui analisis foto feses menggunakan deep learning (MobileNetV2)**
+| Peran | Autentikasi | Area | Kewenangan utama |
+|---|---|---|---|
+| Pekerja Kandang | Tidak login | `/` dan `/result` | Mengambil/memilih foto, menjalankan deteksi, melihat rekomendasi, dan menyimpan hasil dengan memilih nama pekerja aktif. |
+| Admin/Pemilik | Login bersama | `/admin` | Melihat statistik dan riwayat prediksi, soft delete, export CSV prediksi, serta mengelola pekerja dan membuat akun staf. |
+| Dokter Hewan (`veterinarian`) | Login bersama | `/doctor` | Dua tab: `Validasi` dan `Riwayat`. Memvalidasi kasus penyakit serta melihat riwayat miliknya sendiri. |
+| Kepala Pekerja (`head_worker`) | Login bersama | `/head-worker` | Dua tab: `Dashboard` dan `Tindak Lanjut`. Mengonfirmasi pemisahan, memulai penanganan, dan menyelesaikan penanganan. |
 
-*Skripsi — Program Studi Informatika*
+Semua akun staf menggunakan `/login`. Role dibaca dari `app_metadata` Supabase Auth, lalu pengguna diarahkan ke area yang sesuai. Role kosong/tidak dikenal ditolak dan sesinya diakhiri. Pekerja kandang tetap dapat menggunakan alur deteksi tanpa login.
 
-[![React Native](https://img.shields.io/badge/React%20Native-0.81-blue?logo=react)](https://reactnative.dev)
-[![Expo](https://img.shields.io/badge/Expo%20SDK-54-000020?logo=expo)](https://expo.dev)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi)](https://fastapi.tiangolo.com)
-[![TensorFlow](https://img.shields.io/badge/TensorFlow-2.15-FF6F00?logo=tensorflow)](https://www.tensorflow.org)
-[![Supabase](https://img.shields.io/badge/Supabase-Database-3FCF8E?logo=supabase)](https://supabase.com)
-[![License](https://img.shields.io/badge/License-MIT-green)](#license)
+Tidak ada halaman profil untuk role staf. Sistem juga tidak menyimpan identitas ayam atau kandang dan tidak menyediakan notifikasi push.
 
-</div>
+## Workflow kasus penyakit
 
----
+Endpoint simpan hanya menerima empat kelas model. Trigger membuat workflow secara eksplisit untuk baris `predictions` baru berlabel `Coccidiosis`, `New Castle Disease`, atau `Salmonellosis`; `Healthy` tidak masuk antrean, label lain ditolak `422` sebelum insert, dan prediksi lama tidak di-*backfill*.
 
-## 📋 Ringkasan
+1. AI mendeteksi penyakit dan hasil disimpan.
+2. Kepala pekerja segera memisahkan ayam yang terindikasi, tanpa menunggu dokter.
+3. Dokter memilih `Sesuai` (`matching`), `Tidak sesuai` (`incorrect`), atau `Tidak dapat dipastikan` (`uncertain`). `Tidak sesuai` wajib menyertakan label koreksi yang berbeda dari label AI; catatan opsional.
+4. Satu prediksi hanya memiliki satu validasi. Penyimpanan pertama menang saat dua dokter membuka kasus yang sama. Riwayat dokter hanya berisi validasi buatannya, dan hanya pembuat yang boleh mengedit sebelum penanganan dimulai.
+5. Penanganan baru dapat dimulai setelah pemisahan tercatat dan validasi memastikan suatu penyakit: `matching` atau `incorrect` dengan koreksi selain `Healthy`.
+6. Koreksi ke `Healthy` menutup kasus otomatis. `uncertain` mengunci penanganan dengan status perlu pemeriksaan lebih lanjut.
+7. Rekomendasi tetap ditampilkan; setelah koreksi, rekomendasi mengikuti label dokter.
 
-ChickenShii adalah **Decision Support System** (DSS) yang membantu peternak
-ayam petelur mendeteksi penyakit secara dini melalui foto feses. Sistem ini
-menggunakan model **MobileNetV2** yang telah di-*fine-tuning* untuk mengklasifikasikan
-feses ayam ke dalam 4 kelas: **Coccidiosis**, **Healthy**, **New Castle Disease**,
-dan **Salmonellosis**.
+Admin tidak melihat data validasi/tindak lanjut dan export CSV Admin tetap hanya berisi data prediksi.
 
-> ⚠️ **Disclaimer**: Sistem ini bukan alat diagnosis medis. Hasil prediksi
-> bersifat dugaan awal dan harus dikonfirmasi oleh dokter hewan.
+## Teknologi
 
----
+| Lapisan | Teknologi |
+|---|---|
+| Mobile | React Native, Expo SDK 54, Expo Router, NativeWind |
+| Backend | FastAPI, Python 3.11, Pydantic v2, Uvicorn |
+| Machine Learning | TensorFlow/Keras, MobileNetV2, Pillow, NumPy |
+| Data | Supabase PostgreSQL, Auth, Storage |
+| Build/deploy | Docker, EAS Build |
 
-## 📊 Performa Model
+## Arsitektur ringkas
 
-| Kelas | Precision | Recall | F1-Score |
-|-------|:---------:|:------:|:--------:|
-| Coccidiosis | 97.4% | 96.0% | **96.7%** |
-| Healthy | 91.0% | 94.0% | **92.5%** |
-| New Castle Disease | 89.3% | 87.9% | **88.6%** |
-| Salmonellosis | 95.4% | 96.4% | **95.9%** |
-| **Overall Accuracy** | | | **94.5%** |
-
----
-
-## 🛠️ Tech Stack
-
-| Layer | Teknologi |
-|-------|-----------|
-| **Mobile** | React Native · Expo SDK 54 · Expo Router · NativeWind (Tailwind CSS) |
-| **Backend** | FastAPI · Python 3.11 · Uvicorn · Pydantic v2 |
-| **Machine Learning** | TensorFlow/Keras · MobileNetV2 (Fine-Tuned) · Pillow · NumPy |
-| **Database** | Supabase (PostgreSQL) · Supabase Auth · Supabase Storage |
-| **Infra** | Docker · EAS Build |
-
----
-
-## ✨ Fitur Utama
-
-### 👨‍🌾 Pekerja Kandang
-- 📷 Upload foto feses via kamera atau galeri dengan crop tool
-- 🔍 Deteksi AI instan dengan confidence score & bar chart probabilitas
-- 💡 Deskripsi penyakit, penyebab, dan rekomendasi penanganan
-- 💾 Simpan hasil prediksi ke riwayat
-
-### 👨‍💼 Admin / Pemilik Farm
-- 📊 Dashboard statistik dengan grafik tren (mingguan/bulanan/tahunan)
-- 📜 Riwayat prediksi lengkap dengan pencarian & filter
-- 👥 Manajemen pekerja (tambah, nonaktifkan)
-- 📥 Export data ke CSV
-- 🔐 Login aman via Supabase Auth + enkripsi session
-
----
-
-## 🏗️ Arsitektur Sistem
-
-```
-┌─────────────┐     ┌──────────────┐     ┌─────────────────┐
-│  Mobile App │────▶│  FastAPI      │────▶│  Supabase        │
-│  (Expo)     │◀────│  Backend     │◀────│  PostgreSQL +    │
-│             │     │  + ML Model  │     │  Auth + Storage  │
-└─────────────┘     └──────────────┘     └─────────────────┘
+```text
+Mobile App
+  ├─ Pekerja anonim ── predict/save ─────────────┐
+  └─ Staf login ── JWT + role-protected API ─────┤
+                                                  v
+                                      FastAPI + MobileNetV2
+                                                  |
+                                                  v
+                               Supabase Auth + PostgreSQL + Storage
 ```
 
-```
-┌─────────────────────────────────────────────────┐
-│                Inference Pipeline                │
-├─────────────────────────────────────────────────┤
-│  Image → Preprocess (224×224) → MobileNetV2     │
-│        → Softmax (4 classes) → JSON Response    │
-└─────────────────────────────────────────────────┘
-```
+Mobile hanya menyimpan token sesi staf secara aman. Backend memverifikasi token dan role untuk setiap endpoint terlindungi. Tabel workflow mengaktifkan RLS deny-by-default; akses Data API `anon` dan `authenticated` dicabut, sedangkan backend menggunakan `service_role`.
 
----
+## Menjalankan proyek
 
-## 🚀 Getting Started
-
-### Prerequisites
-
-- **Node.js** ≥ 18 & **npm**
-- **Python** ≥ 3.11
-- **Supabase** project ([supabase.com](https://supabase.com))
-- **EAS CLI** (untuk build): `npm install -g eas-cli`
-
-### 1. Clone Repository
-
-```bash
-git clone git@github.com:Keroo0/chickenshii.git
-cd chickenshii
-```
-
-### 2. Setup Backend
+### Backend
 
 ```bash
 cd backend
-
-# Install dependencies
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-
-# Konfigurasi environment
 cp .env.example .env
-# Edit .env dengan credentials Supabase kamu
-
-# Jalankan server
 python run.py
 ```
 
-Backend akan berjalan di `http://localhost:8000`
-
-### 3. Setup Mobile App
+### Mobile
 
 ```bash
 cd mobile
-
-# Install dependencies
 npm install
-
-# Konfigurasi environment
 cp .env.example .env
-# Edit .env dengan URL backend & Supabase kamu
-
-# Jalankan di development
 npx expo start
 ```
 
-### 4. Setup Database
+### Database
 
-Jalankan migration SQL di Supabase SQL Editor:
+Jalankan skema dasar `panduan/schema.sql`, kemudian migration `supabase/migrations/20260802090000_add_staff_workflow.sql`. Migration tersebut membuat tabel workflow, trigger transisi, policy berbasis role, dan melakukan bootstrap seluruh akun Auth yang sudah ada sebagai Admin. Jangan menaruh `SUPABASE_SERVICE_ROLE_KEY` di aplikasi mobile atau repository.
 
-```bash
-# Lihat schema di panduan/schema.sql
-cat panduan/schema.sql
-```
+## Endpoint API
 
----
+Endpoint publik:
 
-## 📁 Struktur Proyek
+| Method | Endpoint | Fungsi |
+|---|---|---|
+| `GET` | `/` atau `/api/v1/health` | Status API/model |
+| `POST` | `/api/v1/predict` | Inferensi tanpa menyimpan |
+| `POST` | `/api/v1/predictions` | Simpan gambar dan hasil prediksi |
 
-```
+Endpoint terlindungi:
+
+| Role | Method | Endpoint | Fungsi |
+|---|---|---|---|
+| Admin | `GET` | `/api/v1/stats` | Statistik prediksi |
+| Admin | `POST` | `/api/v1/staff-accounts` | Membuat akun `veterinarian` atau `head_worker` |
+| Dokter | `GET` | `/api/v1/doctor/validations/pending` | Antrean penyakit belum tervalidasi |
+| Dokter | `GET` | `/api/v1/doctor/validations/history` | Riwayat validator yang login |
+| Dokter | `POST` | `/api/v1/doctor/validations` | Membuat validasi |
+| Dokter | `PATCH` | `/api/v1/doctor/validations/{validation_id}` | Mengubah validasi sebelum penanganan |
+| Kepala Pekerja | `GET` | `/api/v1/head-worker/dashboard` | Ringkasan kasus hari ini |
+| Kepala Pekerja | `GET` | `/api/v1/head-worker/follow-ups` | Daftar tindak lanjut |
+| Kepala Pekerja | `POST` | `/api/v1/head-worker/follow-ups/{prediction_id}/isolate` | Menandai sudah dipisahkan |
+| Kepala Pekerja | `POST` | `/api/v1/head-worker/follow-ups/{prediction_id}/treatment/start` | Memulai penanganan |
+| Kepala Pekerja | `POST` | `/api/v1/head-worker/follow-ups/{prediction_id}/treatment/complete` | Menyelesaikan penanganan |
+
+Semua endpoint terlindungi menggunakan `Authorization: Bearer <access_token>`.
+
+## Skema data
+
+| Tabel | Isi |
+|---|---|
+| `workers` | Identitas pekerja kandang untuk dropdown penyimpanan; bukan akun login. |
+| `predictions` | Citra, kelas AI, confidence, probabilitas, pekerja, timestamp, dan soft delete. |
+| `staff_profiles` | Nama tampilan, email, dan role staf yang terhubung ke `auth.users`. |
+| `prediction_validations` | Satu validasi dokter per prediksi, verdict, koreksi, catatan, dan timestamp. |
+| `prediction_followups` | Aktor/waktu pemisahan, mulai/selesai penanganan, dan penutupan otomatis. |
+
+Bucket `feses-images` menyimpan foto. Rekomendasi berasal dari knowledge base statis untuk menghindari halusinasi LLM.
+
+## Struktur proyek
+
+```text
 chikenshii/
-├── backend/
-│   ├── app/
-│   │   ├── main.py              # FastAPI app
-│   │   ├── api/routes.py        # API endpoints
-│   │   ├── core/config.py       # Configuration
-│   │   ├── services/            # ML & Supabase services
-│   │   ├── models/schemas.py    # Pydantic models
-│   │   └── utils/knowledge_base.py
-│   ├── model/                   # Trained model (.keras)
-│   ├── requirements.txt
-│   ├── Dockerfile
-│   └── run.py
-│
+├── backend/app/
+│   ├── api/routes.py                 # deteksi, simpan, statistik, akun staf
+│   ├── api/workflow_routes.py        # API dokter dan kepala pekerja
+│   ├── models/                       # skema Pydantic
+│   └── services/                     # ML, Supabase, workflow
 ├── mobile/
-│   ├── app/                     # Expo Router pages
-│   │   ├── index.tsx            # Home: upload & detect
-│   │   ├── result.tsx           # Hasil prediksi
-│   │   └── admin/               # Admin panel
-│   ├── components/              # 16 reusable components
-│   ├── services/                # API & Supabase clients
-│   ├── types/                   # TypeScript types
-│   ├── constants/               # Colors, env config
-│   └── utils/                   # Helpers
-│
-├── diagram/                     # Mermaid & drawio diagrams
-├── panduan/                     # Dokumentasi (PRD, SRS, SDD)
-└── result/                      # Training results & charts
+│   ├── app/login.tsx                 # login bersama
+│   ├── app/admin/                    # dashboard, riwayat, pengguna
+│   ├── app/doctor/                   # Validasi dan Riwayat
+│   └── app/head-worker/              # Dashboard dan Tindak Lanjut
+├── supabase/migrations/              # perubahan skema dan policy
+├── diagram/                          # panduan Visual Paradigm Online
+└── panduan/                          # PRD, SRS, SDD, pengujian, deployment
 ```
 
----
+## Model
 
-## 🔌 API Endpoints
+Dataset penelitian berisi 8.276 gambar (8.066 data publik dan 210 data lapangan). Model akhir MobileNetV2 fine-tuned membedakan empat kelas. Metrik eksperimen dan pembahasannya dicatat di `panduan/BAB4_DRAFT.md`; perubahan workflow staf tidak mengubah pipeline pelatihan maupun inferensi model.
 
-| Method | Endpoint | Deskripsi |
-|--------|----------|-----------|
-| `GET` | `/` | Health check + model status |
-| `POST` | `/api/v1/predict` | Inference (tanpa simpan) |
-| `POST` | `/api/v1/predictions` | Simpan prediksi + upload gambar |
-| `GET` | `/api/v1/stats` | Statistik agregat (admin) |
+| Kelas | Precision | Recall | F1-Score |
+|---|---:|---:|---:|
+| Coccidiosis | 97,4% | 96,0% | 96,7% |
+| Healthy | 91,0% | 94,0% | 92,5% |
+| New Castle Disease | 89,3% | 87,9% | 88,6% |
+| Salmonellosis | 95,4% | 96,4% | 95,9% |
+| **Overall Accuracy** |  |  | **94,5%** |
 
-### Contoh Request
+Angka tersebut merupakan ringkasan artefak eksperimen model, bukan hasil validasi dokter dalam aplikasi.
 
-```bash
-# Prediksi
-curl -X POST http://localhost:8000/api/v1/predict \
-  -F "file=@foto_feses.jpg"
-```
+## Dokumentasi
 
-### Contoh Response
+- `panduan/PRD.md`: ruang lingkup produk dan user flow.
+- `panduan/SRS.md`: kebutuhan fungsional, aturan, keamanan, dan status.
+- `panduan/SDD.md`: desain data, API, komponen, dan transisi.
+- `panduan/DeploymentGuide.md`: konfigurasi dan urutan deployment.
+- `diagram/`: satu panduan pembuatan Visual Paradigm Online untuk setiap diagram.
 
-```json
-{
-  "prediction": "Coccidiosis",
-  "confidence": 96.7,
-  "all_predictions": {
-    "Coccidiosis": 96.7,
-    "Healthy": 1.2,
-    "New Castle Disease": 0.8,
-    "Salmonellosis": 1.3
-  }
-}
-```
+## Disclaimer
 
----
-
-## 🗄️ Database Schema
-
-| Tabel | Deskripsi |
-|-------|-----------|
-| `workers` | Data pekerja kandang (nama, status aktif) |
-| `predictions` | Riwayat prediksi (gambar, hasil, confidence, pekerja) |
-
-**Storage Bucket**: `feses-images` — penyimpanan foto feses (public read)
-
-**Security**: Row Level Security (RLS) aktif. Mobile tidak bisa INSERT langsung;
-semua write melalui backend dengan Service Role Key.
-
----
-
-## 🧠 Pipeline Pelatihan
-
-Model dilatih dalam 3 tahap perbandingan:
-
-| Tahap | Metode | Epoch | LR | Hasil |
-|-------|--------|:-----:|:--:|-------|
-| 1 | Baseline Custom CNN | 30 | 0.001 | Baseline |
-| 2 | MobileNetV2 Feature Extraction | 10 | 0.001 | +5-8% |
-| 3 | MobileNetV2 Fine-Tuning | 15 | 1e-5 | **94.5%** |
-
-**Dataset**: 8.276 gambar (8.066 Kaggle + 210 lapangan PT Nirwana Farm)
-
----
-
-## 🐳 Deployment
-
-### Docker (Backend)
-
-```bash
-cd backend
-docker build -t chickenshii-api .
-docker run -p 8000:8000 --env-file .env chickenshii-api
-```
-
-### EAS Build (Mobile)
-
-```bash
-cd mobile
-eas build --platform android
-eas build --platform ios
-```
-
----
-
-## 📄 Dokumentasi
-
-| Dokumen | Lokasi |
-|---------|--------|
-| PRD (Product Requirements) | `panduan/PRD.md` |
-| SRS (Software Requirements) | `panduan/SRS.md` |
-| SDD (System Design) | `panduan/SDD.md` |
-| Deployment Guide | `panduan/DeploymentGuide.md` |
-| Database Schema | `panduan/schema.sql` |
-
----
-
-## 👥 Kontributor
-
-**PT Nirwana Farm** — Partner penelitian & penyedia data lapangan
-
----
-
-<div align="center">
-
-**Built with ❤️ for Indonesian poultry farming**
-
-</div>
+ChickenShii tidak menggantikan pemeriksaan dokter hewan. Hasil AI dan rekomendasi awal harus dipakai sebagai dukungan tindakan preventif dan tetap memerlukan validasi profesional.

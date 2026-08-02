@@ -26,6 +26,40 @@ def test_layer2_validation_corrupted_image():
     with pytest.raises(UnidentifiedImageError):
         ml_service.process_image(fake_bytes)
 
+
+def test_save_prediction_rejects_label_outside_model_classes(monkeypatch):
+    """Endpoint simpan hanya menerima empat label keluaran model."""
+    monkeypatch.setattr(
+        "app.api.routes.supabase_service.validate_worker_id",
+        lambda _worker_id: {"name": "Pekerja Uji"},
+    )
+    monkeypatch.setattr(
+        "app.api.routes.supabase_service.upload_image",
+        lambda _bytes, _filename: "https://example.test/feses.jpg",
+    )
+    monkeypatch.setattr(
+        "app.api.routes.supabase_service.insert_prediction",
+        lambda **_kwargs: {
+            "id": "prediction-1",
+            "image_url": "https://example.test/feses.jpg",
+            "worker_id": "worker-1",
+            "created_at": "2026-08-02T00:00:00Z",
+        },
+    )
+
+    response = client.post(
+        "/api/v1/predictions",
+        files={"file": ("feses.jpg", b"image-bytes", "image/jpeg")},
+        data={
+            "prediction": "Unknown Disease",
+            "confidence": "90.0",
+            "all_predictions": "{}",
+            "worker_id": "worker-1",
+        },
+    )
+
+    assert response.status_code == 422
+
 def test_ml_service_preprocessing_shape():
     """Menguji fungsi prapemrosesan citra (Image Preprocessing)"""
     # Membuat gambar dummy ukuran 500x300

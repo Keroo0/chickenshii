@@ -25,6 +25,9 @@ DISEASE_CLASSES = (
 )
 VERDICTS = ("matching", "incorrect", "uncertain")
 JAKARTA_TIMEZONE = ZoneInfo("Asia/Jakarta")
+DEFAULT_PAGE_LIMIT = 50
+MAX_PAGE_LIMIT = 100
+DEPENDENT_QUERY_CHUNK_SIZE = 100
 
 
 class WorkflowError(RuntimeError):
@@ -334,18 +337,215 @@ def _write(
 def _date_bounds(date_from: Optional[date], date_to: Optional[date]) -> list[tuple[str, str]]:
     params: list[tuple[str, str]] = []
     if date_from:
-        start = datetime.combine(date_from, time.min, tzinfo=timezone.utc).isoformat()
+        start = local_day_utc_bounds(date_from)[0]
         params.append(("created_at", f"gte.{start}"))
     if date_to:
-        exclusive_end = datetime.combine(
-            date_to + timedelta(days=1), time.min, tzinfo=timezone.utc
-        ).isoformat()
+        exclusive_end = local_day_utc_bounds(date_to)[1]
         params.append(("created_at", f"lt.{exclusive_end}"))
     return params
 
 
 def _in_filter(values: Iterable[Any]) -> str:
     return "in.(" + ",".join(str(value) for value in values) + ")"
+
+
+def _read_in_chunks(
+    client: httpx.Client,
+    path: str,
+    *,
+    id_column: str,
+    ids: Iterable[Any],
+    select: str,
+    extra_params: Optional[list[tuple[str, str]]] = None,
+) -> list[dict]:
+    values = list(dict.fromkeys(str(value) for value in ids))
+    rows: list[dict] = []
+    for start in range(0, len(values), DEPENDENT_QUERY_CHUNK_SIZE):
+        chunk = values[start : start + DEPENDENT_QUERY_CHUNK_SIZE]
+        if extra_params:
+            params: Any = [
+                ("select", select),
+                (id_column, _in_filter(chunk)),
+                *extra_params,
+                ("limit", str(DEPENDENT_QUERY_CHUNK_SIZE)),
+            ]
+        else:
+            params = {
+                "select": select,
+                id_column: _in_filter(chunk),
+                "limit": str(DEPENDENT_QUERY_CHUNK_SIZE),
+            }
+        rows.extend(_read(client, path, params=params))
+    return rows
+
+
+def _prediction_extra_params(
+    *,
+    ai_disease: Optional[str] = None,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    created_at_bounds: Optional[tuple[str, str]] = None,
+) -> list[tuple[str, str]]:
+    params: list[tuple[str, str]] = [
+        ("deleted_at", "is.null"),
+        ("prediction", "neq.Healthy"),
+        ("order", "created_at.desc"),
+    ]
+    if ai_disease:
+        params.append(("prediction", f"eq.{ai_disease}"))
+    if created_at_bounds:
+        params.extend(
+            [
+                ("created_at", f"gte.{created_at_bounds[0]}"),
+                ("created_at", f"lt.{created_at_bounds[1]}"),
+            ]
+        )
+    else:
+        params.extend(_date_bounds(date_from, date_to))
+    return params
+
+
+def _load_followup_batch(
+    client: httpx.Client,
+    followups: list[dict],
+    *,
+    ai_disease: Optional[str] = None,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    created_at_bounds: Optional[tuple[str, str]] = None,
+) -> list[dict]:
+    prediction_ids = [row["prediction_id"] for row in followups]
+    predictions = _read_in_chunks(
+        client,
+        "/predictions",
+        id_column="id",
+        ids=prediction_ids,
+        select=PREDICTION_FIELDS,
+        extra_params=_prediction_extra_params(
+            ai_disease=ai_disease,
+            date_from=date_from,
+            date_to=date_to,
+            created_at_bounds=created_at_bounds,
+        ),
+    )
+    visible_ids = [row["id"] for row in predictions]
+    if not visible_ids:
+        return []
+    validations = _read_in_chunks(
+        client,
+        "/prediction_validations",
+        id_column="prediction_id",
+        ids=visible_ids,
+        select=VALIDATION_FIELDS,
+    )
+    workers = _read_in_chunks(
+        client,
+        "/workers",
+        id_column="id",
+        ids=[row["worker_id"] for row in predictions if row.get("worker_id")],
+        select="id,name",
+    )
+    visible_id_set = {str(value) for value in visible_ids}
+    return merge_workflow_rows(
+        predictions=predictions,
+        followups=[
+            row
+            for row in followups
+            if str(row["prediction_id"]) in visible_id_set
+        ],
+        validations=validations,
+        workers=workers,
+    )
+
+
+def _load_prediction_batch(
+    client: httpx.Client, predictions: list[dict]
+) -> list[dict]:
+    prediction_ids = [row["id"] for row in predictions]
+    followups = _read_in_chunks(
+        client,
+        "/prediction_followups",
+        id_column="prediction_id",
+        ids=prediction_ids,
+        select=FOLLOWUP_FIELDS,
+    )
+    workflow_ids = {str(row["prediction_id"]) for row in followups}
+    workflow_predictions = [
+        row for row in predictions if str(row["id"]) in workflow_ids
+    ]
+    if not workflow_predictions:
+        return []
+    visible_ids = [row["id"] for row in workflow_predictions]
+    validations = _read_in_chunks(
+        client,
+        "/prediction_validations",
+        id_column="prediction_id",
+        ids=visible_ids,
+        select=VALIDATION_FIELDS,
+    )
+    workers = _read_in_chunks(
+        client,
+        "/workers",
+        id_column="id",
+        ids=[
+            row["worker_id"]
+            for row in workflow_predictions
+            if row.get("worker_id")
+        ],
+        select="id,name",
+    )
+    return merge_workflow_rows(
+        predictions=workflow_predictions,
+        followups=followups,
+        validations=validations,
+        workers=workers,
+    )
+
+
+def _validate_page(limit: int, offset: int) -> None:
+    if limit < 1 or limit > MAX_PAGE_LIMIT or offset < 0:
+        raise WorkflowSemanticError("invalid pagination")
+
+
+def _scan_followup_items(
+    *,
+    limit: int,
+    offset: int,
+    predicate,
+    ai_disease: Optional[str] = None,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    created_at_bounds: Optional[tuple[str, str]] = None,
+    collect_all: bool = False,
+) -> list[dict]:
+    _validate_page(limit, offset)
+    client = supabase_service._get_client()
+    target_count = offset + limit
+    matched: list[dict] = []
+    scan_offset = 0
+    while collect_all or len(matched) < target_count:
+        params = [
+            ("select", FOLLOWUP_FIELDS),
+            ("order", "created_at.desc"),
+            ("limit", str(MAX_PAGE_LIMIT)),
+            ("offset", str(scan_offset)),
+        ]
+        followups = _read(client, "/prediction_followups", params=params)
+        if not followups:
+            break
+        items = _load_followup_batch(
+            client,
+            followups,
+            ai_disease=ai_disease,
+            date_from=date_from,
+            date_to=date_to,
+            created_at_bounds=created_at_bounds,
+        )
+        matched.extend(item for item in items if predicate(item))
+        if len(followups) < MAX_PAGE_LIMIT:
+            break
+        scan_offset += len(followups)
+    return matched if collect_all else matched[offset:target_count]
 
 
 def _load_workflow_rows(
@@ -357,7 +557,10 @@ def _load_workflow_rows(
     created_at_bounds: Optional[tuple[str, str]] = None,
 ) -> tuple[list[dict], list[dict], list[dict], list[dict]]:
     client = supabase_service._get_client()
-    followup_params: list[tuple[str, str]] = [("select", FOLLOWUP_FIELDS)]
+    followup_params: list[tuple[str, str]] = [
+        ("select", FOLLOWUP_FIELDS),
+        ("limit", "1" if prediction_id else str(MAX_PAGE_LIMIT)),
+    ]
     if prediction_id:
         followup_params.append(("prediction_id", f"eq.{prediction_id}"))
     followups = _read(client, "/prediction_followups", params=followup_params)
@@ -365,45 +568,40 @@ def _load_workflow_rows(
     if not prediction_ids:
         return [], [], [], []
 
-    prediction_params: list[tuple[str, str]] = [
-        ("select", PREDICTION_FIELDS),
-        ("id", _in_filter(prediction_ids)),
-        ("deleted_at", "is.null"),
-        ("prediction", "neq.Healthy"),
-        ("order", "created_at.desc"),
-    ]
-    if ai_disease:
-        prediction_params.append(("prediction", f"eq.{ai_disease}"))
-    if created_at_bounds:
-        prediction_params.extend(
-            [
-                ("created_at", f"gte.{created_at_bounds[0]}"),
-                ("created_at", f"lt.{created_at_bounds[1]}"),
-            ]
-        )
-    else:
-        prediction_params.extend(_date_bounds(date_from, date_to))
-    predictions = _read(client, "/predictions", params=prediction_params)
+    predictions = _read_in_chunks(
+        client,
+        "/predictions",
+        id_column="id",
+        ids=prediction_ids,
+        select=PREDICTION_FIELDS,
+        extra_params=_prediction_extra_params(
+            ai_disease=ai_disease,
+            date_from=date_from,
+            date_to=date_to,
+            created_at_bounds=created_at_bounds,
+        ),
+    )
     visible_ids = [row["id"] for row in predictions]
     if not visible_ids:
         return [], [], [], []
 
-    validations = _read(
+    validations = _read_in_chunks(
         client,
         "/prediction_validations",
-        params={
-            "select": VALIDATION_FIELDS,
-            "prediction_id": _in_filter(visible_ids),
-        },
+        id_column="prediction_id",
+        ids=visible_ids,
+        select=VALIDATION_FIELDS,
     )
     worker_ids = sorted(
         {row.get("worker_id") for row in predictions if row.get("worker_id")}
     )
     workers = (
-        _read(
+        _read_in_chunks(
             client,
             "/workers",
-            params={"select": "id,name", "id": _in_filter(worker_ids)},
+            id_column="id",
+            ids=worker_ids,
+            select="id,name",
         )
         if worker_ids
         else []
@@ -422,19 +620,16 @@ def list_pending_validations(
     disease: Optional[str] = None,
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
+    limit: int = DEFAULT_PAGE_LIMIT,
+    offset: int = 0,
 ) -> list[dict]:
-    predictions, followups, validations, workers = _load_workflow_rows(
-        ai_disease=disease, date_from=date_from, date_to=date_to
-    )
-    validated_ids = {str(row["prediction_id"]) for row in validations}
-    pending_predictions = [
-        row for row in predictions if str(row["id"]) not in validated_ids
-    ]
-    return merge_workflow_rows(
-        predictions=pending_predictions,
-        followups=followups,
-        validations=[],
-        workers=workers,
+    return _scan_followup_items(
+        limit=limit,
+        offset=offset,
+        predicate=lambda item: item.get("validation") is None,
+        ai_disease=disease,
+        date_from=date_from,
+        date_to=date_to,
     )
 
 
@@ -445,62 +640,77 @@ def list_validation_history(
     disease: Optional[str] = None,
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
+    limit: int = DEFAULT_PAGE_LIMIT,
+    offset: int = 0,
 ) -> list[dict]:
+    _validate_page(limit, offset)
     client = supabase_service._get_client()
-    validation_params: list[tuple[str, str]] = [
-        ("select", VALIDATION_FIELDS),
-        ("veterinarian_id", f"eq.{veterinarian_id}"),
-        ("order", "updated_at.desc"),
-    ]
-    if verdict:
-        validation_params.append(("verdict", f"eq.{verdict}"))
-    validations = _read(
-        client, "/prediction_validations", params=validation_params
-    )
-    prediction_ids = [row["prediction_id"] for row in validations]
-    if not prediction_ids:
-        return []
-    followups = _read(
-        client,
-        "/prediction_followups",
-        params={
-            "select": FOLLOWUP_FIELDS,
-            "prediction_id": _in_filter(prediction_ids),
-        },
-    )
-    prediction_params: list[tuple[str, str]] = [
-        ("select", PREDICTION_FIELDS),
-        ("id", _in_filter(prediction_ids)),
-        ("deleted_at", "is.null"),
-        ("prediction", "neq.Healthy"),
-    ]
-    prediction_params.extend(_date_bounds(date_from, date_to))
-    predictions = _read(client, "/predictions", params=prediction_params)
-    worker_ids = sorted(
-        {row.get("worker_id") for row in predictions if row.get("worker_id")}
-    )
-    workers = (
-        _read(
+    target_count = offset + limit
+    matched: list[dict] = []
+    scan_offset = 0
+    while len(matched) < target_count:
+        validation_params: list[tuple[str, str]] = [
+            ("select", VALIDATION_FIELDS),
+            ("veterinarian_id", f"eq.{veterinarian_id}"),
+            ("order", "updated_at.desc"),
+        ]
+        if verdict:
+            validation_params.append(("verdict", f"eq.{verdict}"))
+        validation_params.extend(
+            [
+                ("limit", str(MAX_PAGE_LIMIT)),
+                ("offset", str(scan_offset)),
+            ]
+        )
+        validations = _read(
+            client, "/prediction_validations", params=validation_params
+        )
+        if not validations:
+            break
+        prediction_ids = [row["prediction_id"] for row in validations]
+        followups = _read_in_chunks(
+            client,
+            "/prediction_followups",
+            id_column="prediction_id",
+            ids=prediction_ids,
+            select=FOLLOWUP_FIELDS,
+        )
+        predictions = _read_in_chunks(
+            client,
+            "/predictions",
+            id_column="id",
+            ids=prediction_ids,
+            select=PREDICTION_FIELDS,
+            extra_params=_prediction_extra_params(
+                date_from=date_from, date_to=date_to
+            ),
+        )
+        workers = _read_in_chunks(
             client,
             "/workers",
-            params={"select": "id,name", "id": _in_filter(worker_ids)},
+            id_column="id",
+            ids=[row["worker_id"] for row in predictions if row.get("worker_id")],
+            select="id,name",
         )
-        if worker_ids
-        else []
-    )
-    items = merge_workflow_rows(
-        predictions=predictions,
-        followups=followups,
-        validations=validations,
-        workers=workers,
-    )
-    items.sort(
-        key=lambda row: (row.get("validation") or {}).get("updated_at") or "",
-        reverse=True,
-    )
-    if disease:
-        items = [row for row in items if row["effective_class"] == disease]
-    return items
+        items = merge_workflow_rows(
+            predictions=predictions,
+            followups=followups,
+            validations=validations,
+            workers=workers,
+        )
+        items.sort(
+            key=lambda row: (row.get("validation") or {}).get("updated_at") or "",
+            reverse=True,
+        )
+        matched.extend(
+            item
+            for item in items
+            if not disease or item["effective_class"] == disease
+        )
+        if len(validations) < MAX_PAGE_LIMIT:
+            break
+        scan_offset += len(validations)
+    return matched[offset:target_count]
 
 
 def _validate_validation_shape(verdict: str, corrected_prediction: Optional[str]) -> None:
@@ -592,34 +802,45 @@ def list_followups(
     disease: Optional[str] = None,
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
+    limit: int = DEFAULT_PAGE_LIMIT,
+    offset: int = 0,
 ) -> list[dict]:
-    predictions, followups, validations, workers = _load_workflow_rows(
-        date_from=date_from, date_to=date_to
+    return _scan_followup_items(
+        limit=limit,
+        offset=offset,
+        predicate=lambda item: (
+            (not status_filter or item["status"] == status_filter)
+            and (not disease or item["effective_class"] == disease)
+        ),
+        date_from=date_from,
+        date_to=date_to,
     )
-    items = merge_workflow_rows(
-        predictions=predictions,
-        followups=followups,
-        validations=validations,
-        workers=workers,
-    )
-    if status_filter:
-        items = [row for row in items if row["status"] == status_filter]
-    if disease:
-        items = [row for row in items if row["effective_class"] == disease]
-    return items
 
 
 def get_dashboard(*, today: date) -> dict:
-    predictions, followups, validations, workers = _load_workflow_rows(
-        created_at_bounds=local_day_utc_bounds(today)
-    )
-    items = merge_workflow_rows(
-        predictions=predictions,
-        followups=followups,
-        validations=validations,
-        workers=workers,
-    )
-    return build_dashboard(items, today=today)
+    client = supabase_service._get_client()
+    start, end = local_day_utc_bounds(today)
+    items: list[dict] = []
+    scan_offset = 0
+    while True:
+        params = [
+            ("select", PREDICTION_FIELDS),
+            ("deleted_at", "is.null"),
+            ("prediction", "neq.Healthy"),
+            ("created_at", f"gte.{start}"),
+            ("created_at", f"lt.{end}"),
+            ("order", "created_at.desc"),
+            ("limit", str(MAX_PAGE_LIMIT)),
+            ("offset", str(scan_offset)),
+        ]
+        predictions = _read(client, "/predictions", params=params)
+        if not predictions:
+            break
+        items.extend(_load_prediction_batch(client, predictions))
+        if len(predictions) < MAX_PAGE_LIMIT:
+            break
+        scan_offset += len(predictions)
+    return build_dashboard(items, today=today, latest_limit=5)
 
 
 def _load_case(prediction_id: str) -> dict:
@@ -641,49 +862,44 @@ def transition_followup(
     *, prediction_id: str, actor_id: str, action: str
 ) -> dict:
     case = _load_case(prediction_id)
-    if case.get("closed_at"):
-        return case
-
-    already_done = {
-        "isolate": bool(
-            case.get("isolated_at")
-            or case.get("treatment_started_at")
-            or case.get("treatment_completed_at")
+    transition_fields = {
+        "isolate": ("isolated_at", "isolated_by"),
+        "treatment_start": ("treatment_started_at", "treatment_started_by"),
+        "treatment_complete": (
+            "treatment_completed_at",
+            "treatment_completed_by",
         ),
-        "treatment_start": bool(
-            case.get("treatment_started_at")
-            or case.get("treatment_completed_at")
-        ),
-        "treatment_complete": bool(case.get("treatment_completed_at")),
     }
-    if action not in already_done:
+    if action not in transition_fields:
         raise WorkflowSemanticError("unknown transition")
-    if already_done[action]:
+    timestamp_field, actor_field = transition_fields[action]
+    if case.get(timestamp_field):
         return case
+    if case.get("closed_at"):
+        raise WorkflowConflictError("closed workflow cannot advance")
     if action == "treatment_start" and case.get("verdict") == "uncertain":
         raise WorkflowConflictError("uncertain validation requires examination")
 
     now = datetime.now(timezone.utc).isoformat()
-    payload_by_action = {
-        "isolate": {"isolated_at": now, "isolated_by": actor_id},
-        "treatment_start": {
-            "treatment_started_at": now,
-            "treatment_started_by": actor_id,
-        },
-        "treatment_complete": {
-            "treatment_completed_at": now,
-            "treatment_completed_by": actor_id,
-        },
+    cas_params = {
+        "prediction_id": f"eq.{prediction_id}",
+        timestamp_field: "is.null",
+        "closed_at": "is.null",
     }
+    if action == "treatment_start":
+        cas_params["treatment_completed_at"] = "is.null"
     client = supabase_service._get_client()
     rows = _write(
         client,
         "patch",
         "/prediction_followups",
-        payload=payload_by_action[action],
-        params={"prediction_id": f"eq.{prediction_id}"},
+        payload={timestamp_field: now, actor_field: actor_id},
+        params=cas_params,
         operation="transition",
     )
     if not rows:
+        refreshed = _load_case(prediction_id)
+        if refreshed.get(timestamp_field):
+            return refreshed
         raise WorkflowConflictError("workflow transition conflict")
     return _load_case(prediction_id)

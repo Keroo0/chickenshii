@@ -4,6 +4,8 @@ export interface Worker {
   is_active?: boolean;
 }
 
+export type StaffRole = "admin" | "veterinarian" | "head_worker";
+
 export interface HistoryItem {
   id: string;
   image_url: string;

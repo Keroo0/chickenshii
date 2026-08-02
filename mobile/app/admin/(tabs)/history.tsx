@@ -18,9 +18,11 @@ import { supabase as supabaseClient } from "../../../services/supabase";
 import { colors } from "../../../constants/colors";
 import HistoryListItem from "../../../components/HistoryListItem";
 import { HistoryItem } from "../../../types";
+import { useAuth } from "../../../providers/AuthProvider";
 
 export default function HistoryScreen() {
   const router = useRouter();
+  const { signOut } = useAuth();
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -124,9 +126,8 @@ export default function HistoryScreen() {
   }
 
   async function handleLogout() {
-    if (!supabaseClient) return;
-    await supabaseClient.auth.signOut();
-    router.replace("/admin/login");
+    await signOut();
+    router.replace("/login");
   }
 
   return (

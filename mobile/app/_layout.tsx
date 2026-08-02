@@ -16,6 +16,7 @@ import { useState } from "react";
 import AnimatedSplashScreen from "../components/AnimatedSplashScreen";
 import ErrorBoundary from "../components/ErrorBoundary";
 import { loadSavedApiUrl } from "../services/api";
+import { AuthProvider } from "../providers/AuthProvider";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -42,10 +43,12 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style="dark" />
       <ErrorBoundary>
-        <Stack screenOptions={{ headerShown: false }} />
-        {showSplash && (
-          <AnimatedSplashScreen onAnimationComplete={() => setShowSplash(false)} />
-        )}
+        <AuthProvider>
+          <Stack screenOptions={{ headerShown: false }} />
+          {showSplash && (
+            <AnimatedSplashScreen onAnimationComplete={() => setShowSplash(false)} />
+          )}
+        </AuthProvider>
       </ErrorBoundary>
     </GestureHandlerRootView>
   );

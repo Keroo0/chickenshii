@@ -88,35 +88,51 @@ def test_pending_endpoint_forwards_whitelisted_filters(monkeypatch):
 
     response = client.get(
         "/api/v1/doctor/validations/pending"
-        "?disease=Coccidiosis&date_from=2026-08-01&date_to=2026-08-02",
+        "?disease=Coccidiosis&date_from=2026-08-01&date_to=2026-08-02"
+        "&limit=25&offset=10",
         headers={"Authorization": "Bearer vet"},
     )
 
     assert response.status_code == 200
     assert response.json() == {
         "status": "success",
-        "data": {"items": [{"prediction_id": PREDICTION_ID}]},
+        "data": {
+            "items": [{"prediction_id": PREDICTION_ID}],
+            "limit": 25,
+            "offset": 10,
+        },
     }
     assert service.call_args.kwargs["disease"] == "Coccidiosis"
     assert str(service.call_args.kwargs["date_from"]) == "2026-08-01"
+    assert service.call_args.kwargs["limit"] == 25
+    assert service.call_args.kwargs["offset"] == 10
 
 
 def test_history_uses_token_user_and_forwards_filters(monkeypatch):
     monkeypatch.setattr(
         supabase_service, "require_role", Mock(return_value=auth("veterinarian", VET_ID))
     )
-    service = Mock(return_value=[{"validation_id": VALIDATION_ID}])
+    service = Mock(
+        return_value=[
+            {"prediction_id": PREDICTION_ID, "validation_id": VALIDATION_ID}
+        ]
+    )
     monkeypatch.setattr(workflow_service, "list_validation_history", service)
 
     response = client.get(
         "/api/v1/doctor/validations/history"
-        "?verdict=matching&disease=Coccidiosis&date_from=2026-08-01&date_to=2026-08-02",
+        "?verdict=matching&disease=Coccidiosis&date_from=2026-08-01&date_to=2026-08-02"
+        "&limit=30&offset=4",
         headers={"Authorization": "Bearer vet"},
     )
 
     assert response.status_code == 200
     assert service.call_args.kwargs["veterinarian_id"] == VET_ID
     assert service.call_args.kwargs["verdict"] == "matching"
+    assert service.call_args.kwargs["limit"] == 30
+    assert service.call_args.kwargs["offset"] == 4
+    assert response.json()["data"]["limit"] == 30
+    assert response.json()["data"]["offset"] == 4
 
 
 def test_create_validation_uses_actor_from_token_never_body(monkeypatch):
@@ -262,7 +278,7 @@ def test_dashboard_and_followups_happy_paths(monkeypatch):
     followup_response = client.get(
         "/api/v1/head-worker/follow-ups"
         "?status=pending_isolation&disease=Coccidiosis"
-        "&date_from=2026-08-01&date_to=2026-08-02",
+        "&date_from=2026-08-01&date_to=2026-08-02&limit=40&offset=3",
         headers={"Authorization": "Bearer head"},
     )
 
@@ -271,6 +287,36 @@ def test_dashboard_and_followups_happy_paths(monkeypatch):
     assert followup_response.status_code == 200
     assert followups.call_args.kwargs["status_filter"] == "pending_isolation"
     assert followups.call_args.kwargs["disease"] == "Coccidiosis"
+    assert followups.call_args.kwargs["limit"] == 40
+    assert followups.call_args.kwargs["offset"] == 3
+    assert followup_response.json()["data"]["limit"] == 40
+    assert followup_response.json()["data"]["offset"] == 3
+
+
+@pytest.mark.parametrize(
+    "query",
+    ["limit=0", "limit=101", "offset=-1"],
+)
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/doctor/validations/pending",
+        "/api/v1/doctor/validations/history",
+        "/api/v1/head-worker/follow-ups",
+    ],
+)
+def test_list_pagination_is_validated(monkeypatch, path, query):
+    monkeypatch.setattr(
+        supabase_service,
+        "require_role",
+        Mock(return_value=auth("veterinarian", VET_ID)),
+    )
+
+    response = client.get(
+        f"{path}?{query}", headers={"Authorization": "Bearer token"}
+    )
+
+    assert response.status_code == 422
 
 
 @pytest.mark.parametrize(
@@ -285,7 +331,9 @@ def test_head_worker_actions_use_token_actor(monkeypatch, suffix, action):
     monkeypatch.setattr(
         supabase_service, "require_role", Mock(return_value=auth("head_worker", HEAD_ID))
     )
-    service = Mock(return_value={"prediction_id": PREDICTION_ID, "status": "ok"})
+    service = Mock(
+        return_value={"prediction_id": PREDICTION_ID, "status": "pending_isolation"}
+    )
     monkeypatch.setattr(workflow_service, "transition_followup", service)
 
     response = client.post(
@@ -354,3 +402,23 @@ def test_workflow_handlers_are_sync_for_threadpool_execution():
         workflow_routes.complete_treatment,
     ]
     assert all(not inspect.iscoroutinefunction(handler) for handler in handlers)
+
+
+def test_workflow_routes_declare_typed_response_models():
+    workflow_paths = {
+        "/api/v1/doctor/validations/pending",
+        "/api/v1/doctor/validations/history",
+        "/api/v1/doctor/validations",
+        f"/api/v1/doctor/validations/{{validation_id}}",
+        "/api/v1/head-worker/dashboard",
+        "/api/v1/head-worker/follow-ups",
+        "/api/v1/head-worker/follow-ups/{prediction_id}/isolate",
+        "/api/v1/head-worker/follow-ups/{prediction_id}/treatment/start",
+        "/api/v1/head-worker/follow-ups/{prediction_id}/treatment/complete",
+    }
+    routes_by_path = {
+        route.path: route for route in app.routes if route.path in workflow_paths
+    }
+
+    assert routes_by_path.keys() == workflow_paths
+    assert all(route.response_model is not None for route in routes_by_path.values())

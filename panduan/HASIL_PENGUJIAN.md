@@ -1,84 +1,96 @@
-# DOKUMEN HASIL PENGUJIAN SISTEM CHICKENSHII
-*(Dokumen ini berisi poin-poin spesifik hasil pengujian yang siap dipindahkan ke dalam Bab 4 atau Lampiran)*
+# Hasil Pengujian Sistem ChickenShii
 
----
+Dokumen ini memisahkan hasil otomatis yang benar-benar sudah dieksekusi dari skenario manual yang masih membutuhkan bukti. Status `Belum diuji` tidak boleh diubah menjadi `Pass` sebelum ada tanggal, perangkat/environment, tester, dan bukti screenshot/log.
 
-## 1. Pengujian White Box (Unit Testing Backend)
-Pengujian *White Box* difokuskan pada verifikasi struktur logika internal dan *error handling* dari *source code* backend (FastAPI), tanpa melibatkan UI (*User Interface*). Pengujian dilakukan menggunakan *framework* `pytest`.
+## 1. Pengujian otomatis
 
-### Skenario & Hasil Pengujian White Box:
-Berikut adalah modul/fungsi internal yang diuji beserta hasilnya:
+Catatan status: hasil pada bagian ini merupakan eksekusi terbaru setelah penyelesaian layar Dokter dan Kepala Pekerja. Hasil otomatis tidak menggantikan pengujian manual/E2E pada perangkat dan project Supabase target.
 
-**A. Modul Validasi File & Keamanan (Two-Layer Validation)**
-- **Skenario:** Menguji fungsi pemeriksaan ekstensi dan *MIME-type* file (Layer 1).
-  - **Logic yang diuji:** Blok `if file.content_type not in ["image/jpeg", "image/png"]`.
-  - **Input:** Mengirimkan file dengan format `.pdf` dan `.txt` ke fungsi validasi.
-  - **Hasil yang diharapkan:** Sistem membangkitkan `HTTPException 400 Bad Request`.
-  - **Status:** **PASS** (100% *branch coverage* untuk blok pengecekan ekstensi terpenuhi).
+### 1.1 Backend
 
-- **Skenario:** Menguji fungsi pemeriksaan integritas *byte* gambar (Layer 2).
-  - **Logic yang diuji:** Blok `try-except` saat membuka file gambar menggunakan *library* PIL/Pillow.
-  - **Input:** Mengirimkan file berekstensi `.jpg` namun berisi *script* teks berbahaya (*corrupted/fake image*).
-  - **Hasil yang diharapkan:** Blok `except` terpicu dan melempar *error* "Invalid image file".
-  - **Status:** **PASS**.
+Perintah verifikasi:
 
-**B. Modul Machine Learning (`ml_service.py`)**
-- **Skenario:** Menguji fungsi prapemrosesan citra (*Image Preprocessing*).
-  - **Logic yang diuji:** Transformasi *array* gambar menjadi *tensor* dengan ukuran dimensi yang valid (contoh: 224x224x3).
-  - **Input:** Gambar beresolusi acak (misal 500x300).
-  - **Hasil yang diharapkan:** Fungsi berhasil me-*return* *tensor* berukuran pasti `(1, 224, 224, 3)` tanpa *error* indeks.
-  - **Status:** **PASS**.
-
-**C. Modul Autentikasi / Database (`supabase_service.py`)**
-- **Skenario:** Menguji verifikasi token sesi pengguna.
-  - **Logic yang diuji:** Pengecekan token *header* API terhadap layanan Supabase Auth.
-  - **Input:** Token JWT yang sudah *expired* atau *invalid* di-*inject* ke fungsi.
-  - **Hasil yang diharapkan:** Fungsi *auth middleware* menggagalkan proses dan mengembalikan `HTTPException 401 Unauthorized`.
-  - **Status:** **PASS**.
-
-### Log Hasil Eksekusi Pytest (White Box)
-Berikut adalah log terminal aktual dari eksekusi unit testing menggunakan *pytest*:
-
-```text
-============================= test session starts ==============================
-platform darwin -- Python 3.11.15, pytest-9.1.1, pluggy-1.6.0 -- /Users/rmg/Penelitian/skripsi/project/chikenshii/backend/.venv/bin/python
-cachedir: .pytest_cache
-rootdir: /Users/rmg/Penelitian/skripsi/project/chikenshii/backend
-plugins: anyio-4.14.2
-collecting ... collected 4 items
-
-tests/test_whitebox.py::test_layer1_validation_rejects_pdf PASSED        [ 25%]
-tests/test_whitebox.py::test_layer2_validation_corrupted_image PASSED    [ 50%]
-tests/test_whitebox.py::test_ml_service_preprocessing_shape PASSED       [ 75%]
-tests/test_whitebox.py::test_verify_admin_token_invalid PASSED           [100%]
-
-======================== 4 passed in 5.90s ========================
+```bash
+cd backend
+.venv/bin/python -m pytest -q
 ```
 
----
+Hasil eksekusi 2 Agustus 2026: **163 passed**. Jumlah ini mencakup alur inferensi/simpan/statistik, penolakan label simpan di luar empat kelas model, autentikasi dan role, provisioning akun staf beserta konflik email duplikat, workflow service/API, invariant soft delete, serta empat pengujian kontrak dokumentasi.
 
-## 2. Pengujian Black Box (Empiris UI/UX Mobile & Admin)
-Pengujian *Black Box* dilakukan dari kacamata pengguna akhir (Peternak & Admin). Penguji tidak melihat *source code*, melainkan hanya mengoperasikan aplikasi dan memastikan *input* menghasilkan *output* yang benar di layar.
+Pengujian baru memverifikasi antara lain:
 
-### Skenario & Hasil Pengujian Black Box:
+- token tidak ada/tidak valid menghasilkan 401 dan role silang menghasilkan 403;
+- hanya Admin dapat membuat akun staf, validasi request, konflik email, serta penanganan kegagalan upstream;
+- antrean Dokter hanya berisi kasus penyakit belum tervalidasi dan riwayat dibatasi ke validator login;
+- validasi `matching`, `incorrect`, `uncertain`, koreksi wajib, kompetisi first-write-wins, ownership, dan edit lock;
+- dashboard/filter follow-up Kepala Pekerja;
+- pemisahan sebelum validasi, penolakan treatment sebelum syarat, uncertain, koreksi Healthy, start, dan complete;
+- pagination/filter dan mapping error workflow.
 
-**A. Aplikasi Mobile (React Native)**
-1. **Fitur Login**
-   - **Langkah:** Memasukkan *email* dan *password* yang valid -> Tekan Login.
-   - **Hasil Aktual:** Aplikasi memproses selama ±1 detik dan berhasil *redirect* ke halaman *Dashboard* Utama.
-   - **Status:** **PASS**.
-2. **Fitur Deteksi Penyakit (Akses Kamera/Galeri)**
-   - **Langkah:** Menekan ikon kamera -> Memberikan izin akses (*permission*) -> Memotret feses -> Menekan tombol "Analisis".
-   - **Hasil Aktual:** Sistem menampilkan *loading spinner*, lalu memunculkan kartu hasil analisis yang berisi Prediksi (misal: "NCD"), Persentase Keyakinan (*Confidence Score*), dan Anjuran Tindakan.
-   - **Status:** **PASS**.
-3. 
+Empat pengujian kontrak dokumentasi yang termasuk dalam total tersebut memastikan sumber Mermaid dan nama penjelasan generik telah dihapus, setiap folder mempunyai satu panduan lengkap, enam diagram tambahan tersedia, dan diagram inti memuat empat role.
 
-**B. Fitur Dasbor Admin (Aplikasi Mobile)**
-1. **Navigasi Riwayat Deteksi**
-   - **Langkah:** Mengakses menu/tab Dasbor Admin di dalam aplikasi.
-   - **Hasil Aktual:** Layar riwayat muncul dan menampilkan data deteksi terbaru (foto, waktu, nama pekerja, dan hasil) yang ditarik dari *backend*.
-   - **Status:** **PASS**.
-2. **Filter Data / Statistik**
-   - **Langkah:** Memilih periode (*week/month/year*) pada layar statistik dasbor.
-   - **Hasil Aktual:** Layar langsung memilah dan menampilkan jumlah prediksi (*total* dan rincian per kelas penyakit) sesuai periode yang dipilih.
-   - **Status:** **PASS**.
+### 1.2 Mobile
+
+Perintah:
+
+```bash
+cd mobile
+npm test
+```
+
+Hasil eksekusi 2 Agustus 2026: **26 passed, 0 failed**. Suite menguji mapping `admin`/`veterinarian`/`head_worker`, penolakan role tidak dikenal, pengambilan role hanya dari `app_metadata`, validasi/normalisasi form akun staf, format data workflow, aturan input validasi, label/status terminal, ketersediaan aksi tindak lanjut, sanitasi error API, dan pemisahan client API anonim/staf agar token tidak pernah mengikuti URL backend khusus.
+
+Pemeriksaan TypeScript dijalankan dengan:
+
+```bash
+cd mobile
+npx tsc --noEmit
+```
+
+Hasil eksekusi 2 Agustus 2026: **lulus tanpa diagnostic TypeScript** (exit code 0) setelah implementasi UI role baru selesai.
+
+## 2. Matriks black-box manual
+
+| ID | Aktor/skenario | Langkah ringkas | Hasil yang diharapkan | Status bukti |
+|---|---|---|---|---|
+| BB-01 | Pekerja tanpa login | Buka aplikasi, crop, deteksi, simpan | Alur lama tetap selesai tanpa login | Belum diuji |
+| BB-02 | Login Admin | Masuk via `/login` | Redirect `/admin` | Belum diuji |
+| BB-03 | Login Dokter | Masuk via `/login` | Redirect `/doctor` | Belum diuji |
+| BB-04 | Login Kepala Pekerja | Masuk via `/login` | Redirect `/head-worker` | Belum diuji |
+| BB-05 | Role tidak dikenal | Login dengan role di luar daftar | Sesi diakhiri dan akses ditolak | Belum diuji |
+| BB-06 | Akses lintas role | Uji seluruh pasangan area asing: Admin → Doctor/Head Worker, Dokter → Admin/Head Worker, dan Kepala Pekerja → Admin/Doctor, masing-masing melalui route mobile serta endpoint API role tujuan | Setiap route mengarahkan kembali ke area role yang benar dan setiap endpoint API asing menolak akses | Belum diuji |
+| BB-07 | Admin buat staf | Nama, email, role, password sementara valid | Akun dapat login sesuai role | Belum diuji |
+| BB-08 | Email duplikat | Buat akun dengan email terdaftar | Pesan konflik, tidak ada akun ganda | Belum diuji |
+| BB-09 | Healthy baru | Simpan prediksi Healthy | Tidak muncul di Validasi/Tindak Lanjut | Belum diuji |
+| BB-10 | Data historis | Periksa prediksi sebelum migration | Tidak masuk workflow | Belum diuji |
+| BB-11 | Validasi sesuai | Dokter pilih Sesuai | Tersimpan dan masuk riwayat sendiri | Belum diuji |
+| BB-12 | Validasi tidak sesuai | Simpan tanpa/dengan koreksi | Tanpa koreksi ditolak; koreksi valid diterima | Belum diuji |
+| BB-13 | Validasi tidak pasti | Pilih Tidak dapat dipastikan | Status perlu pemeriksaan; treatment terkunci | Belum diuji |
+| BB-14 | Kompetisi dokter | Dua dokter simpan kasus sama | Penyimpanan pertama menang; kedua konflik/refresh | Belum diuji |
+| BB-15 | Edit validasi | Pembuat edit sebelum/sesudah treatment | Sebelum boleh; sesudah ditolak | Belum diuji |
+| BB-16 | Riwayat dokter | Bandingkan akun dokter A/B | Masing-masing hanya melihat miliknya | Belum diuji |
+| BB-17 | Pemisahan cepat | Kepala Pekerja isolate sebelum dokter | Berhasil dan audit aktor/waktu terisi | Belum diuji |
+| BB-18 | Treatment terlalu awal | Start sebelum isolate/validasi | Ditolak dengan alasan yang jelas | Belum diuji |
+| BB-19 | Treatment valid | Isolate + validasi penyakit + start | Status active treatment | Belum diuji |
+| BB-20 | Koreksi Healthy | Dokter koreksi menjadi Healthy | Kasus auto closed, treatment tidak tersedia | Belum diuji |
+| BB-21 | Selesai treatment | Complete setelah start | Status treatment completed | Belum diuji |
+| BB-22 | Rekomendasi koreksi | Koreksi ke penyakit lain | Rekomendasi mengikuti label dokter | Belum diuji |
+| BB-23 | Visibilitas Admin | Buka riwayat/export CSV | Tidak ada field validasi/tindak lanjut | Belum diuji |
+| BB-24 | State antarmuka | Putus koneksi/empty/refresh/modal | Loading, empty, error, retry, refresh, modal bekerja | Belum diuji |
+
+## 3. Template bukti uji manual
+
+Untuk setiap ID, lampirkan:
+
+- tanggal dan nama tester;
+- role dan akun uji (tanpa menulis password/token);
+- perangkat/OS serta versi build;
+- kondisi awal data;
+- screenshot sebelum/sesudah atau rekaman layar;
+- request ID/log backend bila relevan;
+- hasil aktual dan status Pass/Fail;
+- catatan bug beserta retest.
+
+## 4. Regresi wajib
+
+Sebelum menyatakan rilis siap, ulangi dashboard/riwayat Admin, manajemen pekerja, soft delete, statistik, export CSV, deteksi pekerja anonim, upload invalid/lebih dari 5 MB, retry simpan, dan disclaimer medis. Penambahan workflow tidak boleh mengubah pipeline model atau memasukkan data validasi ke statistik/CSV Admin.

@@ -284,11 +284,8 @@ def test_create_staff_account_maps_duplicate_email(monkeypatch):
             )
         ),
     )
-    monkeypatch.setattr(
-        supabase_service.httpx,
-        "get",
-        Mock(return_value=FakeResponse(404, {"message": "not found"})),
-    )
+    auth_get = Mock()
+    monkeypatch.setattr(supabase_service.httpx, "get", auth_get)
 
     with pytest.raises(supabase_service.DuplicateEmailError):
         supabase_service.create_staff_account(
@@ -297,6 +294,8 @@ def test_create_staff_account_maps_duplicate_email(monkeypatch):
             password="password123",
             role="veterinarian",
         )
+
+    auth_get.assert_not_called()
 
 
 def test_create_staff_account_maps_explicit_duplicate_code(monkeypatch):
@@ -305,11 +304,8 @@ def test_create_staff_account_maps_explicit_duplicate_code(monkeypatch):
         "post",
         Mock(return_value=FakeResponse(422, {"code": "user_already_exists"})),
     )
-    monkeypatch.setattr(
-        supabase_service.httpx,
-        "get",
-        Mock(return_value=FakeResponse(404, {"message": "not found"})),
-    )
+    auth_get = Mock()
+    monkeypatch.setattr(supabase_service.httpx, "get", auth_get)
 
     with pytest.raises(supabase_service.DuplicateEmailError):
         supabase_service.create_staff_account(
@@ -318,6 +314,8 @@ def test_create_staff_account_maps_explicit_duplicate_code(monkeypatch):
             password="password123",
             role="veterinarian",
         )
+
+    auth_get.assert_not_called()
 
 
 def test_create_staff_account_classifies_indeterminate_auth_timeout(monkeypatch):
@@ -441,61 +439,16 @@ def test_create_staff_account_recovers_malformed_success_response(monkeypatch):
     assert result["id"] == expected_id
 
 
-def test_create_staff_account_recovers_duplicate_at_deterministic_id(monkeypatch):
-    expected_id = supabase_service.deterministic_staff_user_id("vet@example.com")
+def test_create_staff_account_rejects_duplicate_at_deterministic_id_without_lookup(
+    monkeypatch,
+):
     monkeypatch.setattr(
         supabase_service.httpx,
         "post",
         Mock(return_value=FakeResponse(422, {"code": "user_already_exists"})),
     )
-    monkeypatch.setattr(
-        supabase_service.httpx,
-        "get",
-        Mock(
-            return_value=FakeResponse(
-                200,
-                {
-                    "id": expected_id,
-                    "email": "vet@example.com",
-                    "app_metadata": {"role": "veterinarian"},
-                },
-            )
-        ),
-    )
-    matching_profile = {
-        "user_id": expected_id,
-        "full_name": "Dr. Sari",
-        "email": "vet@example.com",
-        "role": "veterinarian",
-        "created_at": "2026-08-02T08:00:00Z",
-    }
-    profile_client = Mock()
-    profile_client.get.return_value = FakeResponse(200, [matching_profile])
-    monkeypatch.setattr(supabase_service, "_get_client", Mock(return_value=profile_client))
-
-    result = supabase_service.create_staff_account(
-        full_name="Dr. Sari",
-        email="vet@example.com",
-        password="password123",
-        role="veterinarian",
-    )
-
-    assert result["id"] == expected_id
-    profile_client.post.assert_not_called()
-
-
-def test_create_staff_account_keeps_unrelated_duplicate_as_duplicate(monkeypatch):
-    expected_id = supabase_service.deterministic_staff_user_id("vet@example.com")
-    monkeypatch.setattr(
-        supabase_service.httpx,
-        "post",
-        Mock(return_value=FakeResponse(422, {"code": "user_already_exists"})),
-    )
-    monkeypatch.setattr(
-        supabase_service.httpx,
-        "get",
-        Mock(return_value=FakeResponse(404, {"message": "not found"})),
-    )
+    auth_get = Mock()
+    monkeypatch.setattr(supabase_service.httpx, "get", auth_get)
 
     with pytest.raises(supabase_service.DuplicateEmailError):
         supabase_service.create_staff_account(
@@ -505,15 +458,35 @@ def test_create_staff_account_keeps_unrelated_duplicate_as_duplicate(monkeypatch
             role="veterinarian",
         )
 
-    assert expected_id in supabase_service.httpx.get.call_args.args[0]
+    auth_get.assert_not_called()
 
 
-def test_create_staff_account_retry_returns_matching_existing_profile(monkeypatch):
-    expected_id = supabase_service.deterministic_staff_user_id("vet@example.com")
+def test_create_staff_account_keeps_unrelated_duplicate_as_duplicate(monkeypatch):
     monkeypatch.setattr(
         supabase_service.httpx,
         "post",
         Mock(return_value=FakeResponse(422, {"code": "user_already_exists"})),
+    )
+    auth_get = Mock()
+    monkeypatch.setattr(supabase_service.httpx, "get", auth_get)
+
+    with pytest.raises(supabase_service.DuplicateEmailError):
+        supabase_service.create_staff_account(
+            full_name="Dr. Sari",
+            email="vet@example.com",
+            password="password123",
+            role="veterinarian",
+        )
+
+    auth_get.assert_not_called()
+
+
+def test_create_staff_account_recovers_5xx_at_deterministic_id(monkeypatch):
+    expected_id = supabase_service.deterministic_staff_user_id("vet@example.com")
+    monkeypatch.setattr(
+        supabase_service.httpx,
+        "post",
+        Mock(return_value=FakeResponse(503, {"message": "upstream unavailable"})),
     )
     monkeypatch.setattr(
         supabase_service.httpx,
@@ -556,7 +529,7 @@ def test_create_staff_account_rejects_mismatched_existing_profile_without_delete
     monkeypatch.setattr(
         supabase_service.httpx,
         "post",
-        Mock(return_value=FakeResponse(422, {"code": "user_already_exists"})),
+        Mock(return_value=FakeResponse(503, {"message": "upstream unavailable"})),
     )
     monkeypatch.setattr(
         supabase_service.httpx,

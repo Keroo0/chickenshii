@@ -1,134 +1,114 @@
 # BAB 4
 # HASIL DAN PEMBAHASAN
 
-Bab ini menguraikan hasil dari penelitian yang telah dilakukan, mulai dari implementasi lingkungan dan antarmuka sistem, hasil eksperimen dan evaluasi model *deep learning* yang digunakan, pengujian fungsional perangkat lunak, hingga evaluasi kebergunaan (*usability testing*) oleh pengguna akhir. Bab ini ditutup dengan pembahasan strategis serta analisis dampak dari hasil yang diperoleh.
+Bab ini memuat implementasi sistem, eksperimen model, pengujian fungsional, evaluasi kebergunaan, dan pembahasan. Teks dalam tanda `[Isi setelah bukti tersedia]` adalah placeholder dan tidak boleh ditulis sebagai hasil empiris sebelum pengujian dilakukan.
 
-## 4.1 Implementasi Lingkungan dan Antarmuka Sistem
+## 4.1 Implementasi lingkungan dan antarmuka
 
-Tahap implementasi bertujuan untuk merealisasikan rancangan sistem ke dalam bentuk perangkat lunak yang beroperasi pada lingkungan yang telah ditentukan. Sistem Chickenshii terdiri dari aplikasi *mobile* berbasis React Native untuk pengguna akhir, dasbor admin, dan *backend* berbasis FastAPI.
+ChickenShii menggunakan aplikasi mobile React Native/Expo, backend FastAPI, model MobileNetV2, dan Supabase. Arsitektur akhir membedakan empat aktor: Pekerja Kandang tanpa login, Admin, Dokter Hewan, serta Kepala Pekerja.
 
-**A. Implementasi Aplikasi Mobile (React Native)**
-Aplikasi *mobile* telah berhasil di-deploy dan dijalankan pada perangkat fisik pintar (Redmi 10). Berikut adalah bukti fisik antarmuka aplikasi yang berjalan pada perangkat tersebut:
+### A. Alur Pekerja Kandang
 
-*(Tempatkan Foto/Screenshot 1: Tampilan Beranda Aplikasi di HP Redmi 10)*
+Pekerja dapat mengambil atau memilih citra feses, melakukan crop, menjalankan deteksi, melihat confidence/probabilitas/rekomendasi, dan menyimpan hasil dengan identitas pekerja aktif. Pekerja tidak memerlukan akun.
 
-*(Tempatkan Foto/Screenshot 2: Tampilan Pemindaian/Deteksi Feses di HP Redmi 10)*
+`[Sisipkan screenshot beranda, crop/loading, hasil, dan modal simpan pada build yang diuji.]`
 
-*(Tempatkan Foto/Screenshot 3: Tampilan Hasil Deteksi Penyakit)*
+### B. Login bersama dan Admin
 
-**B. Implementasi Dasbor Admin**
-Dasbor admin berfungsi sebagai pusat kendali untuk memantau data deteksi dan mengelola operasional sistem. Antarmuka dasbor telah diimplementasikan dengan fitur-fitur pemantauan yang komprehensif.
+Seluruh staf memakai halaman `/login`. Sistem membaca role aman pada `app_metadata` lalu mengarahkan Admin ke `/admin`, Dokter ke `/doctor`, atau Kepala Pekerja ke `/head-worker`. Tab Admin `Pengguna` menggabungkan pengelolaan pekerja kandang dan pembuatan akun staf.
 
-*(Tempatkan Foto/Screenshot 4: Tampilan Utama Dasbor Admin)*
+`[Sisipkan screenshot login, Dashboard Admin, Riwayat, dan dua segmen Pengguna.]`
 
-*(Tempatkan Foto/Screenshot 5: Tampilan Manajemen Data/Riwayat)*
+### C. Antarmuka Dokter Hewan
 
-**C. Status Operasional Backend FastAPI (macOS 15)**
-*Backend* sistem yang dibangun menggunakan kerangka kerja FastAPI telah di-deploy dan berjalan secara stabil pada lingkungan sistem operasi macOS 15. Server *backend* menangani proses autentikasi, manajemen basis data, serta melayani *endpoint* inferensi model *deep learning*.
+Area Dokter dibatasi pada dua tab: `Validasi` untuk antrean bersama kasus penyakit baru dan `Riwayat` untuk validasi milik dokter login. Form modal menyediakan keputusan Sesuai, Tidak sesuai, dan Tidak dapat dipastikan. Koreksi wajib pada pilihan Tidak sesuai.
 
-*(Tempatkan Screenshot 6: Log terminal yang menunjukkan FastAPI berjalan di macOS 15, misalnya pesan "Uvicorn running on http://127.0.0.1:8000" dan log *request* yang berhasil)*
+`[Sisipkan screenshot kedua tab, modal tiga verdict, error koreksi, empty/loading/error, dan edit terkunci setelah treatment.]`
 
----
+Status implementasi: kedua tab, kartu kasus, modal detail/form, state loading/empty/error, retry, dan refresh telah tersedia pada kode mobile. Bukti uji perangkat serta screenshot masih harus diisi setelah pengujian manual.
 
-## 4.2 Hasil Eksperimen dan Evaluasi Model Deep Learning
+### D. Antarmuka Kepala Pekerja
 
-Pada bagian ini, dilakukan evaluasi terhadap kinerja model *deep learning* dalam mengklasifikasikan feses ayam. Eksperimen dilakukan dengan membandingkan tiga skenario *training*, yaitu: *Baseline CNN*, *Feature Extraction*, dan *Fine-Tuning*.
+Area Kepala Pekerja memiliki dua tab: `Dashboard` dan `Tindak Lanjut`. Pemisahan dapat dicatat segera; treatment baru dapat dimulai setelah pemisahan dan validasi definitif. Koreksi Healthy menutup kasus, sedangkan hasil tidak pasti memerlukan pemeriksaan lanjutan.
 
-**A. Perbandingan Performa 3 Skenario Training**
-Berikut adalah tabel perbandingan hasil evaluasi akhir dari ketiga skenario *training* berdasarkan metrik Akurasi, *Precision*, *Recall*, dan F1-*Score*.
+`[Sisipkan screenshot ringkasan, daftar tindak lanjut, modal isolate/start/complete, uncertain, dan auto-closed.]`
 
-*(Tempatkan Tabel 4.1: Tabel perbandingan metrik evaluasi untuk Baseline CNN, Feature Extraction, dan Fine-Tuning)*
+Status implementasi: kedua tab, empat ringkasan dashboard, filter status, modal detail, konfirmasi pemisahan/mulai/selesai, dan state antarmuka telah tersedia pada kode mobile. Bukti uji perangkat serta screenshot masih harus diisi setelah pengujian manual.
 
-**B. Grafik Konvergensi Epoch**
-Proses pelatihan model dievaluasi melalui grafik konvergensi *loss* dan *accuracy* terhadap jumlah *epoch*. Grafik ini menunjukkan seberapa baik model belajar dan menggeneralisasi data selama proses *training*.
+### E. Backend dan basis data
 
-*(Tempatkan Grafik 1: Kurva Training & Validation Loss untuk masing-masing skenario)*
+Backend menyediakan endpoint publik deteksi/simpan serta endpoint terlindungi berdasarkan role. Migration menambahkan `staff_profiles`, `prediction_validations`, dan `prediction_followups`, RLS deny-by-default, serta trigger urutan workflow. Hanya prediksi penyakit yang disimpan setelah migration yang masuk workflow.
 
-*(Tempatkan Grafik 2: Kurva Training & Validation Accuracy untuk masing-masing skenario)*
+`[Sisipkan bukti health check, log request tanpa secret/token, migration applied, dan contoh penolakan lintas role.]`
 
-*Analisis Singkat: (Jelaskan grafik di atas, skenario mana yang konvergen paling cepat dan mana yang menunjukkan gejala overfitting/underfitting).*
+## 4.2 Hasil eksperimen model deep learning
 
-**C. Bedah Confusion Matrix Final**
-Untuk melihat secara detail performa klasifikasi tiap kelas (khususnya untuk kelas yang tidak seimbang), berikut disajikan *Confusion Matrix* dari model terbaik (misal: *Fine-Tuning*).
+Eksperimen membandingkan Baseline CNN, MobileNetV2 Feature Extraction, dan MobileNetV2 Fine-Tuning.
 
-*(Tempatkan Gambar: Confusion Matrix Final dari model terbaik)*
+### A. Perbandingan tiga skenario
 
-*Analisis Singkat: (Jelaskan jumlah True Positive, False Positive, True Negative, dan False Negative pada masing-masing kelas. Soroti kelas mana yang sering salah diklasifikasikan).*
+`[Masukkan tabel accuracy, precision, recall, dan F1-score dari artefak eksperimen final; cantumkan sumber file.]`
 
----
+### B. Kurva konvergensi
 
-## 4.3 Hasil Pengujian Fungsional Perangkat Lunak
+`[Masukkan kurva training/validation loss dan accuracy. Jelaskan konvergensi serta indikasi overfitting/underfitting berdasarkan grafik, bukan asumsi.]`
 
-Pengujian fungsional bertujuan untuk memastikan bahwa seluruh fitur pada antarmuka sistem dan logika validasi pada *backend* berjalan sesuai dengan spesifikasi yang diharapkan.
+### C. Confusion matrix
 
-**A. Uji Empiris Black Box Antarmuka**
-Pengujian *Black Box* dilakukan untuk mengevaluasi fungsionalitas antarmuka dari perspektif pengguna tanpa melihat struktur kode internal.
+`[Masukkan confusion matrix model terpilih. Jelaskan TP/FP/FN per kelas dan dampak imbalance, khususnya NCD.]`
 
-**Tabel 4.2 Hasil Pengujian Black Box**
-| No | Skenario Pengujian | Langkah Pengujian | Hasil yang Diharapkan | Hasil Aktual | Status |
-|---|---|---|---|---|---|
-| 1 | Login Pengguna | Memasukkan kredensial valid dan menekan tombol login | Masuk ke halaman utama aplikasi | Masuk ke halaman utama | Pass |
-| 2 | Deteksi Gambar | Mengunggah gambar feses dan menekan tombol deteksi | Sistem mengembalikan hasil klasifikasi penyakit | Hasil klasifikasi muncul | Pass |
-| ... | *(Tambahkan skenario pengujian antarmuka lainnya)* | ... | ... | ... | ... |
+Penambahan role tidak mengubah dataset, arsitektur model, preprocessing, atau pipeline inferensi; perubahan berlangsung setelah hasil prediksi disimpan.
 
-**B. Eksekusi Unit Testing (Pytest) untuk Two-Layer Validation**
-Untuk menjamin integritas data dan logika, dilakukan *unit testing* menggunakan **pytest**, secara spesifik menguji fitur *Two-Layer Validation*. Berikut adalah ringkasan laporan log eksekusinya:
+## 4.3 Hasil pengujian fungsional
+
+### A. Pengujian otomatis
+
+Pada 2 Agustus 2026, suite backend lengkap dijalankan setelah implementasi role baru selesai dengan perintah:
 
 ```text
-============================= test session starts ==============================
-platform darwin -- Python 3.11.15, pytest-9.1.1, pluggy-1.6.0 -- /Users/rmg/Penelitian/skripsi/project/chikenshii/backend/.venv/bin/python
-cachedir: .pytest_cache
-rootdir: /Users/rmg/Penelitian/skripsi/project/chikenshii/backend
-plugins: anyio-4.14.2
-collecting ... collected 4 items
-
-tests/test_whitebox.py::test_layer1_validation_rejects_pdf PASSED        [ 25%]
-tests/test_whitebox.py::test_layer2_validation_corrupted_image PASSED    [ 50%]
-tests/test_whitebox.py::test_ml_service_preprocessing_shape PASSED       [ 75%]
-tests/test_whitebox.py::test_verify_admin_token_invalid PASSED           [100%]
-
-======================== 4 passed in 5.90s ========================
+.venv/bin/python -m pytest -q
 ```
-*Analisis Singkat: (Jelaskan bahwa sistem berhasil melewati seluruh assertion pada Two-Layer Validation, memvalidasi integritas input sebelum diteruskan ke model).*
 
----
+Hasilnya adalah **163 pengujian backend lulus**. Suite mencakup fungsi lama, pembatasan label simpan ke empat kelas model, autentikasi/role, provisioning akun staf, penolakan email duplikat, validasi dokter, transisi tindak lanjut, perlindungan terhadap soft delete, dan empat pengujian kontrak dokumentasi diagram.
 
-## 4.4 Hasil Evaluasi Kebergunaan (Usability Testing)
+Suite mobile yang dijalankan dengan `npm test` menghasilkan **26 pengujian lulus, 0 gagal**. Cakupannya meliputi mapping role dari `app_metadata`, validasi form akun staf, aturan validasi Dokter, format/status workflow, gating aksi Kepala Pekerja, sanitasi error API, serta pemisahan client API anonim dan staf agar token tidak dikirim ke URL khusus. Pemeriksaan `npx tsc --noEmit` juga selesai dengan exit code 0 tanpa diagnostic setelah UI Dokter dan Kepala Pekerja selesai diimplementasikan.
 
-Evaluasi kebergunaan (*Usability Testing*) dilakukan dengan menggunakan instrumen kuesioner *System Usability Scale* (SUS) untuk mengukur tingkat penerimaan pengguna terhadap aplikasi. Responden merupakan para pekerja kandang dari PT Nirwana Farm.
+Empat pengujian kontrak dokumentasi Visual Paradigm termasuk dalam total suite backend tersebut. `[Lampirkan log final backend, TypeScript, dan mobile pada lampiran.]`
 
-**Tabulasi dan Perhitungan Kuesioner SUS**
+### B. Pengujian black-box
 
-*(Tempatkan Tabel 4.3: Tabulasi data mentah jawaban (Skala 1-5) dari 10 pertanyaan SUS untuk seluruh responden pekerja kandang)*
+Skenario lengkap tersedia pada `panduan/HASIL_PENGUJIAN.md`. Skenario minimum meliputi login/redirect tiga role, penolakan lintas role, tiga verdict dokter, kompetisi validator, pemisahan sebelum validasi, gating treatment, koreksi Healthy, uncertain, selesai treatment, serta regresi pekerja/Admin.
 
-Perhitungan skor akhir SUS dilakukan berdasarkan rumus standar SUS:
-- Untuk pertanyaan ganjil (positif): Skor = (Nilai Skala) - 1
-- Untuk pertanyaan genap (negatif): Skor = 5 - (Nilai Skala)
-- Skor Akhir = (Total Skor Ganjil + Total Skor Genap) * 2.5
+Status hasil manual: **belum boleh disimpulkan** sampai bukti pada perangkat dan environment target tersedia.
 
-*(Tempatkan Tabel 4.4: Hasil Perhitungan Skor Akhir SUS tiap responden dan Rata-rata Skor Keseluruhan)*
+`[Masukkan tabel ID skenario, hasil aktual, status, tanggal, perangkat, dan referensi bukti.]`
 
-*Analisis Singkat: (Contoh: "Berdasarkan hasil perhitungan, diperoleh rata-rata skor SUS sebesar **[Masukkan Skor]**. Skor ini masuk ke dalam kategori **[Acceptable/Marginal/Not Acceptable]** dan grade scale **[A/B/C/D/F]**, yang menunjukkan bahwa aplikasi Chickenshii dapat diterima dan mudah digunakan oleh para pekerja kandang PT Nirwana Farm dalam operasional sehari-hari").*
+## 4.4 Evaluasi kebergunaan
 
----
+Evaluasi dapat memakai System Usability Scale (SUS) terhadap kelompok pengguna yang relevan. Karena workflow kini mempunyai Pekerja, Admin, Dokter, dan Kepala Pekerja, responden dan tugas uji perlu dipisahkan menurut role.
 
-## 4.5 Pembahasan Strategis dan Analisis Dampak
+`[Masukkan jumlah responden, teknik sampling, instrumen, jawaban mentah, perhitungan SUS, dan interpretasi setelah data dikumpulkan.]`
 
-Berdasarkan hasil yang telah diuraikan, terdapat beberapa temuan strategis yang memerlukan analisis mendalam terkait performa sistem klasifikasi dan arsitektur operasional.
+Jangan menyatakan aplikasi mudah digunakan atau mencantumkan skor SUS sebelum kuesioner aktual dianalisis.
 
-**A. Analisis Metrik Kelas Minoritas (NCD) akibat Intervensi Class Weights**
-Pada evaluasi model, ditemukan bahwa pada kelas minoritas penyakit *Newcastle Disease* (NCD), model menghasilkan tingkat **Recall yang tinggi** namun **Precision yang rendah**. Kondisi ini merupakan hasil langsung dari penerapan intervensi *Class Weights* selama fase pelatihan (*training*).
+## 4.5 Pembahasan
 
-*Class Weights* diterapkan untuk memberikan penalti yang lebih besar kepada model jika salah mengklasifikasikan kelas minoritas (NCD), memaksa model untuk lebih "sensitif" terhadap fitur penyakit ini.
-- **Tingginya Recall (Sensitivitas):** Menunjukkan bahwa model berhasil mendeteksi hampir seluruh kasus NCD yang sebenarnya. Dalam konteks peternakan, hal ini sangat krusial karena NCD adalah penyakit yang sangat menular dan fatal. Kehilangan satu kasus positif (*False Negative*) dapat berakibat penyebaran wabah di seluruh kandang.
-- **Rendahnya Precision:** Menunjukkan bahwa sensitivitas tinggi tersebut dibayar dengan meningkatnya *False Positive* (beberapa feses sehat atau penyakit lain diprediksi sebagai NCD). Meskipun ini dapat menyebabkan peringatan palsu bagi peternak, dalam manajemen risiko wabah, lebih baik melakukan pemeriksaan ekstra (*False Positive*) daripada melewatkan penyakit mematikan (*False Negative*).
+### A. Dampak validasi manusia
 
-Oleh karena itu, *trade-off* antara *Recall* dan *Precision* ini adalah keputusan strategis yang secara klinis lebih menguntungkan untuk keselamatan unggas di PT Nirwana Farm.
+Dokter Hewan mengubah keluaran model dari dugaan tunggal menjadi keputusan yang dapat dikonfirmasi, dikoreksi, atau ditunda untuk pemeriksaan. Namun, karena hanya prediksi penyakit yang masuk antrean, data validasi ini tidak merepresentasikan evaluasi akurasi terhadap seluruh kelas, terutama true negative Healthy.
 
-**B. Justifikasi Operasional Sistem Tanpa LLM**
-Dalam pengembangan sistem ini, arsitektur difokuskan pada deteksi citra (*Computer Vision*) dan antarmuka operasional yang lugas tanpa mengintegrasikan *Large Language Models* (LLM) sebagai asisten diagnosis berbasis teks. Justifikasi dari keputusan ini didasarkan pada beberapa faktor operasional di lapangan:
-1. **Kecepatan dan Latensi:** Intervensi di kandang ayam membutuhkan keputusan secara *real-time*. Deteksi gambar murni jauh lebih cepat diproses dibandingkan harus mem-parsing hasil prediksi, mengirimkannya ke API LLM pihak ketiga, dan menunggu balasan naratif.
-2. **Keterbatasan Infrastruktur dan Biaya:** Operasional di lingkungan peternakan sering kali memiliki koneksi internet yang fluktuatif. Ketergantungan pada LLM (seperti GPT-4 atau sejenisnya) membutuhkan *bandwidth* yang stabil dan meningkatkan biaya operasional API. Model klasifikasi *in-house* yang di-*host* di server FastAPI lokal menjamin ketersediaan sistem (*high availability*).
-3. **Kesesuaian dengan Pengguna Akhir:** Hasil *usability testing* menunjukkan pekerja kandang membutuhkan hasil yang instan, langsung (*point-and-shoot*), dan instruksi baku (misal: label "Sehat", "NCD", "Coccidiosis"). Narasi panjang hasil *generate* dari LLM justru berpotensi membingungkan dan memperlambat tindakan preventif yang harus segera dilakukan di lapangan.
+### B. Pemisahan sebelum validasi
 
-Keputusan mengeliminasi LLM menjadikan sistem Chickenshii lebih ringan (*lightweight*), deterministik, dan tangguh (*robust*) untuk dioperasikan secara mandiri.
+Pemisahan segera merupakan keputusan preventif: tindakan operasional tidak menunggu kepastian dokter, sementara pemberian penanganan tetap dikunci sampai ada validasi definitif. Desain ini membedakan mitigasi risiko awal dari keputusan treatment.
+
+### C. Integritas dan akuntabilitas
+
+First-write-wins mencegah dua diagnosis aktif untuk satu prediksi. Riwayat milik sendiri, pencatatan aktor/waktu, edit lock setelah treatment, dan urutan database menjaga audit trail walaupun request bersamaan atau client bermasalah.
+
+### D. Knowledge base tanpa LLM
+
+Rekomendasi statis dipertahankan untuk latensi, determinisme, dan mengurangi risiko halusinasi medis. Setelah koreksi dokter, rekomendasi menggunakan label efektif agar konten tidak bertentangan dengan hasil validasi.
+
+### E. Batas penelitian
+
+Sistem tidak mengidentifikasi ayam/kandang, tidak mengirim push notification, tidak menyediakan profil staf, dan tidak melakukan backfill. Keterbatasan tersebut menjaga scope, tetapi membatasi pelacakan epidemiologis dan evaluasi longitudinal; hal ini dapat dicatat sebagai peluang penelitian selanjutnya.

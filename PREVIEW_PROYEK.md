@@ -1,115 +1,72 @@
-# 🐔 ChickenShii - Sistem Deteksi Dini Penyakit Ayam Petelur Berbasis AI
+# Preview Proyek ChickenShii
 
-**ChickenShii** adalah aplikasi *mobile* dan *sistem pakar cerdas* berbasis *Computer Vision* (Deep Learning) untuk mendeteksi penyakit pada kotoran (feses) ayam petelur (layer) di **PT Nirwana Farm**. Sistem ini bertindak sebagai alat bantu (*Decision Support System*) untuk memberikan dugaan awal guna mempercepat tindakan preventif peternak.
+## Gambaran umum
 
----
+ChickenShii adalah aplikasi mobile dan REST API untuk deteksi dini penyakit ayam petelur dari citra feses. MobileNetV2 menghasilkan dugaan kelas dan confidence, sedangkan workflow manusia memastikan hasil penyakit ditindaklanjuti secara operasional. Sistem merupakan Decision Support System, bukan pengganti diagnosis dokter hewan.
 
-## 🎯 1. Deskripsi & Aktor Sistem
+## Aktor sistem
 
-Sistem ini membatasi akses pada dua jenis pengguna utama:
+1. **Pekerja Kandang (tanpa login):** mengambil/memilih foto, melakukan crop, menjalankan deteksi, melihat detail serta rekomendasi awal, lalu menyimpan hasil dengan memilih nama pekerja aktif.
+2. **Admin/Pemilik (login):** membuka Dashboard, Riwayat, dan Pengguna; mengelola pekerja lama, membuat akun Dokter/Kepala Pekerja, serta mengekspor data prediksi tanpa data workflow.
+3. **Dokter Hewan (login):** memiliki tepat dua tab, `Validasi` dan `Riwayat`. Dokter memvalidasi kasus penyakit dan hanya melihat riwayat validasinya sendiri.
+4. **Kepala Pekerja (login):** memiliki tepat dua tab, `Dashboard` dan `Tindak Lanjut`. Kepala pekerja mencatat pemisahan serta status penanganan.
 
-### 👨‍🌾 A. Pekerja Kandang (Non-Login)
-Role ini merepresentasikan staf kandang yang melakukan pengecekan harian.
-- Mengunggah foto feses ayam (*single image*) via kamera atau galeri.
-- Melihat hasil prediksi kelas penyakit, *confidence score*, dan probabilitas.
-- Membaca deskripsi singkat penyakit dan rekomendasi awal penanganan.
-- Menyimpan hasil prediksi ke dalam *history* (disertai nama pekerja).
+`/login` dipakai bersama oleh seluruh staf. Setelah token diverifikasi, role `admin`, `veterinarian`, atau `head_worker` dari `app_metadata` menentukan redirect ke `/admin`, `/doctor`, atau `/head-worker`. Role lain ditolak. Tidak ada halaman profil staf.
 
-### 👨‍💼 B. Admin / Pemilik Farm (Login)
-Admin mengelola operasional farm secara menyeluruh melalui Dashboard khusus.
-- Akses ke **Dashboard Statistik** (Total prediksi, distribusi kelas, filter mingguan/bulanan/tahunan).
-- Manajemen **Riwayat Prediksi** (Mencari, memfilter, dan *soft delete* histori).
-- Manajemen **Daftar Pekerja** (Menambah/menonaktifkan pekerja untuk standarisasi nama).
-- Mengunduh (*export*) data prediksi dalam format **CSV**.
+## Alur operasional baru
 
----
+- Hanya prediksi penyakit baru yang menghasilkan `prediction_followups`; `Healthy` dan data sebelum migration tidak masuk workflow.
+- Ayam yang terindikasi penyakit wajib segera dipisahkan oleh Kepala Pekerja, bahkan sebelum validasi dokter.
+- Dokter memilih `Sesuai`, `Tidak sesuai`, atau `Tidak dapat dipastikan`. Koreksi wajib untuk `Tidak sesuai`; catatan opsional.
+- Satu prediksi hanya dapat dimenangkan oleh satu validator. Dokter hanya dapat mengedit validasinya sendiri sebelum penanganan dimulai.
+- Penanganan membutuhkan status sudah dipisahkan dan hasil dokter yang memastikan penyakit.
+- Koreksi menjadi `Healthy` menutup kasus otomatis. Hasil tidak pasti menampilkan kebutuhan pemeriksaan lebih lanjut dan memblokir penanganan.
+- Rekomendasi lama tetap tampil dan mengikuti label hasil koreksi dokter.
 
-## 🛠️ 2. Teknologi (Tech Stack)
+## Teknologi dan batas sistem
 
-Aplikasi dibangun menggunakan teknologi modern lintas-platform dengan batasan ekosistem yang terkelola dengan baik:
+- **Mobile:** React Native, Expo, Expo Router, NativeWind.
+- **Backend:** FastAPI, Pydantic, TensorFlow/Keras, MobileNetV2.
+- **Data:** Supabase PostgreSQL, Auth, Storage.
+- **Keamanan:** JWT, role pada `app_metadata`, validasi role di backend, RLS deny-by-default untuk tabel workflow.
+- **Batas ruang lingkup:** tanpa notifikasi push, identitas ayam, identitas kandang, fitur Admin untuk reset/aktivasi akun staf, kewajiban mengganti password sementara, maupun alur reset password mandiri pada halaman login.
 
-* **Frontend (Mobile App):** React Native, dikembangkan dengan Expo (*Managed Workflow*). Navigasi menggunakan *Expo Router*, dan UI Styling menggunakan *NativeWind* (Tailwind CSS untuk React Native).
-* **Backend API:** FastAPI (Python) dengan server Uvicorn, bertugas menangani pembacaan model AI dan *request* dari aplikasi *Frontend*.
-* **Database & Storage:** Supabase (PostgreSQL untuk riwayat, *Supabase Auth* untuk Admin, dan *Supabase Storage* untuk foto feses).
-* **AI & Machine Learning:** TensorFlow/Keras untuk lingkungan pelatihan dan arsitektur model klasifikasi gambar (*MobileNetV2*).
+## Dataset dan model
 
----
+Dataset berjumlah 8.276 citra: 8.066 citra publik dan 210 citra lapangan PT Nirwana Farm. Kelas akhir adalah Coccidiosis, Healthy, New Castle Disease, dan Salmonellosis. Pipeline training/inference tidak berubah karena penambahan role hanya memperluas validasi dan tindak lanjut setelah prediksi disimpan.
 
-## 📊 3. Detail Dataset (Sumber: Kaggle & Lapangan)
+Distribusi gabungan adalah 2.566 citra Coccidiosis, 2.404 Healthy, 2.625 Salmonellosis, dan 681 New Castle Disease. Dataset dibagi secara stratified menjadi 70% training, 15% validation, dan 15% testing.
 
-Proyek ini memadukan dataset publik (*Open Source*) dan dataset riil yang dikumpulkan langsung dari peternakan. Penggabungan ini krusial untuk memastikan model dapat mengenali kondisi asli di lapangan secara akurat (mengatasi masalah "Domain Shift").
+Eksperimen tetap membandingkan tiga skenario:
 
-* **Dataset Publik (Sumber: Kaggle):** 
-  - Mencakup **8.066 gambar** utama yang terdistribusi ke dalam 4 kelas klasifikasi penyakit.
-* **Dataset Lapangan (Sumber: Observasi PT Nirwana Farm):**
-  - Mencakup **210 gambar** yang diambil secara langsung dari kotoran ayam petelur di lingkungan kandang PT Nirwana Farm untuk melengkapi variasi pencahayaan, tekstur, dan sudut pandang asli.
-* **Distribusi Keseluruhan Dataset (Total: 8.276 Gambar):**
-  - Kombinasi kedua sumber tersebut menghasilkan komposisi akhir dataset sebagai berikut:
-    - **Coccidiosis:** 2.566 gambar
-    - **Healthy (Sehat):** 2.404 gambar
-    - **Salmonella:** 2.625 gambar
-    - **New Castle Disease (NCD):** 681 gambar
-  - Saat *training*, dataset gabungan ini otomatis dipecah secara proporsional menggunakan *Stratified Split* menjadi **70% Training**, **15% Validation**, dan **15% Testing**.
+1. Baseline Custom CNN sebagai pembanding dasar.
+2. MobileNetV2 Feature Extraction dengan backbone beku.
+3. MobileNetV2 Fine-Tuning dengan 30 layer terakhir dibuka dan learning rate `1e-5`.
 
----
+Konfigurasi utama memakai citra 224×224, batch 32, optimizer Adam, EarlyStopping, dan ReduceLROnPlateau. Seluruh angka evaluasi model harus bersumber dari artefak eksperimen, bukan dari tabel validasi dokter karena workflow hanya mencakup prediksi penyakit.
 
-## 🏗️ 4. Arsitektur & Pipeline Pelatihan (AI)
+## Skema data
 
-Pelatihan dilakukan menggunakan **TensorFlow/Keras** di lingkungan Google Colab dengan skenario perbandingan 3 tahap (untuk kebutuhan Bab 4 Skripsi):
+| Entitas | Fungsi |
+|---|---|
+| `workers` | Daftar pekerja kandang non-login. |
+| `predictions` | Riwayat hasil AI dan gambar. |
+| `staff_profiles` | Identitas tampilan dan role akun staf. |
+| `prediction_validations` | Satu keputusan dokter untuk setiap prediksi penyakit. |
+| `prediction_followups` | Jejak pemisahan, penanganan, selesai, atau penutupan otomatis. |
+| `feses-images` | Bucket foto feses. |
 
-### A. Model 1: Baseline Custom CNN
-* **Tujuan:** Sebagai pembanding dasar (performa tanpa *transfer learning*).
-* **Arsitektur:** 3 *block* (Conv2D + MaxPooling2D) -> Flatten -> Dense (128) -> Dropout (0.5) -> Softmax (4 kelas).
+Existing Auth users dibootstrap sebagai Admin saat migration. Admin tidak memperoleh akses ke isi `prediction_validations` atau `prediction_followups`; workflow hanya diakses melalui backend sesuai role.
 
-### B. Model 2: MobileNetV2 (Feature Extraction)
-* **Tujuan:** Memanfaatkan bobot *ImageNet* untuk ekstraksi fitur yang jauh lebih canggih.
-* **Metode:** Semua *layer* bawaan MobileNetV2 **dibekukan** (*frozen*), melatih hanya *classifier head* dengan *Learning Rate* normal.
+## Antarmuka ringkas
 
-### C. Model 3: MobileNetV2 (Fine-Tuning)
-* **Tujuan:** Mengadaptasi model secara penuh terhadap tekstur spesifik kotoran ayam peternakan asli.
-* **Metode:** Membuka (*unfreeze*) **30 layer terakhir** MobileNetV2 dan melatih ulang dengan *Learning Rate* sangat kecil (`1e-5`).
+- Pekerja: Home deteksi dan layar hasil.
+- Admin: Dashboard, Riwayat, Pengguna. Tab Pengguna menggabungkan pengelolaan pekerja dengan formulir akun staf.
+- Dokter: dua tab dan modal detail/form validasi.
+- Kepala Pekerja: dua tab dan modal detail/konfirmasi tindakan.
 
-### D. Konfigurasi Training & Alasan Teknis
-* **Image Size & Batch Size:** `224x224` piksel (ukuran optimal yang disyaratkan arsitektur MobileNetV2) dengan `Batch Size: 32` (keseimbangan terbaik antara penggunaan memori GPU dan kestabilan pembaruan *gradient*).
-* **Optimizer:** Adam (*Adaptive Moment Estimation*) karena mampu beradaptasi secara otomatis pada kecepatan konvergensi (pembelajaran) di dataset gambar.
-* **Epoch (Durasi Pelatihan):**
-  * **Tahap 1 - Feature Extraction (10 Epoch):** Jumlah layer yang dilatih sangat sedikit (hanya kepala klasifikasi) dengan LR yang besar. Model akan belajar dengan sangat cepat dan biasanya konvergen di bawah 10 putaran. Jika dipaksakan lebih lama, model akan rentan *overfitting*.
-  * **Tahap 2 - Fine-Tuning (15 Epoch):** Karena langkah belajarnya (*Learning Rate*) sengaja dibuat merayap sangat lambat (`1e-5`), maka model membutuhkan waktu (jumlah iterasi) yang jauh lebih panjang. 15 epoch memberikan kesempatan yang cukup bagi model untuk merayap menemukan titik akurasi tertinggi tanpa terpotong prematur di tengah jalan.
-* **Learning Rate (LR) Dinamis:**
-  * **Tahap 1 (Feature Extraction):** `LR = 0.001` (Cenderung besar. Alasannya agar layer *Classifier Head* baru yang kita bangun bisa belajar dengan cepat dari nol tanpa terhambat).
-  * **Tahap 2 (Fine-Tuning):** `LR = 1e-5` (Sangat kecil. Alasannya agar kita tidak secara agresif "merusak" pengetahuan/bobot asli *ImageNet* yang sudah tertanam di MobileNetV2, melainkan hanya menggesernya sedikit demi sedikit agar beradaptasi dengan tekstur feses ayam).
-* **Callbacks Khusus:**
-  * **EarlyStopping (patience=5):** Jika akurasi *Validation* tidak meningkat selama 5 *epoch* berturut-turut, pelatihan otomatis dihentikan. Alasannya: Mencegah *Overfitting* (model hanya hafal mati data *training* tapi bodoh di dunia nyata) dan menghemat waktu.
-  * **ReduceLROnPlateau (factor=0.2, patience=3):** Jika akurasi stagnan, *Learning Rate* diperkecil secara drastis (80%). Alasannya: Saat model hampir mencapai puncak akurasi, langkah pencariannya harus lebih kecil dan teliti agar bisa menemukan titik loss paling minimal.
+Modal tidak dihitung sebagai halaman. Keputusan dua tab menjaga scope mobile tetap sederhana.
 
----
+## Nilai penelitian
 
-## 🗄️ 6. Skema Database (Supabase PostgreSQL)
-
-Sistem menggunakan **Supabase** sebagai *Backend-as-a-Service* untuk keperluan *Database* relasional dan penyimpanan file (*Storage Bucket*).
-
-### Tabel Utama:
-1. **`workers`** (Tabel Pekerja Kandang)
-   - Digunakan untuk standarisasi nama saat pekerja menyimpan hasil prediksi (menghindari salah ketik).
-   - *Kolom:* `id` (UUID), `name`, `is_active` (boolean), `created_at`.
-2. **`predictions`** (Tabel Riwayat Prediksi)
-   - Menyimpan seluruh histori deteksi yang dikonfirmasi oleh pengguna.
-   - *Kolom:* `id` (UUID), `image_url` (link gambar), `prediction` (kelas utama), `confidence`, `all_predictions` (JSON data 4 kelas), `worker_id` (Foreign Key ke *workers*), `deleted_at` (Penanda *soft-delete* dari Admin), dan `created_at`.
-3. **Storage Bucket: `feses-images`**
-   - Tempat penyimpanan foto feses hasil *upload* dari aplikasi.
-
-### Keamanan (Row Level Security / RLS)
-- Aplikasi *mobile* (Pekerja) dilarang melakukan `INSERT` langsung ke tabel `predictions` maupun ke *Storage Bucket*.
-- Seluruh penulisan riwayat dan gambar **wajib** melewati backend FastAPI menggunakan *Service Role Key*, untuk menjamin validasi keamanan dan integritas *foreign key* `worker_id`.
-
----
-
-## 📑 7. Kesimpulan Spesifikasi Sistem (Ringkasan SRS & SDD)
-
-Berdasarkan dokumen *Software Requirements Specification* (SRS) dan *System Design Document* (SDD), berikut adalah kaidah dan aturan inti ( *Business Rules* ) yang diterapkan di aplikasi ini:
-
-* **Validasi Dua Lapis (Two-Layer Validation):** Aplikasi *Mobile* akan memblokir gambar > 5MB atau file non-gambar sebelum dikirim. *Backend* FastAPI kembali memvalidasi ulang ukuran file (*HTTP 413 Payload Too Large*) dan format tipe data sebelum diumpankan ke model AI.
-* **Peringatan Kepercayaan Rendah (Low Confidence Warning):** Jika skor akurasi (confidence) di bawah ambang batas dinamis (`confidence_threshold` yang dikirim dari server), aplikasi akan memunculkan peringatan (warna kuning/merah) agar pengguna mengambil ulang foto dari jarak/cahaya yang lebih baik.
-* **Tanpa LLM (Large Language Models):** Penjelasan medis penyakit (*Knowledge Base*) menggunakan kamus statis yang sudah divalidasi ahli, bukan memanggil API ChatGPT/AI Generatif. Ini demi menghindari halusinasi (kesalahan rekomendasi medis) dan mempercepat latensi.
-* **Keamanan Sesi Admin:** Token login Admin disimpan di enkripsi perangkat (*Keychain/Keystore*) menggunakan `expo-secure-store`, tidak disimpan secara teks polos (*plain text*).
-* **Integritas Riwayat (Soft Delete):** Admin tidak dapat menghapus riwayat secara permanen (*hard delete*) dari UI, melainkan hanya menandainya terhapus (`deleted_at = NOW()`), untuk mencegah rusaknya data analitik secara permanen.
+Penambahan Dokter Hewan memisahkan dugaan AI dari keputusan profesional. Penambahan Kepala Pekerja membuat tindakan preventif dapat dilacak tanpa menunda pemisahan ayam. Dengan demikian, keluaran model bukan hanya ditampilkan, tetapi masuk ke rangkaian keputusan yang memiliki pembatas otorisasi dan urutan status yang jelas.

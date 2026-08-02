@@ -43,7 +43,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="workers"
         options={{
-          title: "Pekerja",
+          title: "Pengguna",
           tabBarIcon: ({ color, size }) => (
             <Users size={size} color={color} />
           ),

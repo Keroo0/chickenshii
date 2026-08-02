@@ -17,6 +17,7 @@ import { colors, diseaseColors } from "../../../constants/colors";
 import DecorativeBackground from "../../../components/DecorativeBackground";
 import HistoryListItem from "../../../components/HistoryListItem";
 import { HistoryItem } from "../../../types";
+import { useAuth } from "../../../providers/AuthProvider";
 
 const DISEASES = ["Salmonellosis", "New Castle Disease", "Coccidiosis"] as const;
 
@@ -36,6 +37,7 @@ const screenWidth = Dimensions.get("window").width;
 
 export default function OverviewScreen() {
   const router = useRouter();
+  const { signOut } = useAuth();
   const [period, setPeriod] = useState<"week" | "month" | "year">("month");
   const [showPeriodPicker, setShowPeriodPicker] = useState(false);
   const [diseaseCounts, setDiseaseCounts] = useState<Record<string, number>>({});
@@ -195,9 +197,8 @@ export default function OverviewScreen() {
   };
 
   async function handleLogout() {
-    if (!supabaseClient) return;
-    await supabaseClient.auth.signOut();
-    router.replace("/admin/login");
+    await signOut();
+    router.replace("/login");
   }
 
   const currentPeriodLabel = PERIODS.find((p) => p.value === period)?.label || "Bulanan";

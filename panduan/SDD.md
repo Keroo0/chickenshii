@@ -1,348 +1,203 @@
-System Design Document (SDD)
+# System Design Document (SDD)
+
+## 1. Arsitektur sistem
+
+```text
+Expo Mobile
+├─ Pekerja Kandang: alur anonim deteksi/simpan
+└─ Staf: Supabase Auth + RoleGuard
+       │ Authorization: Bearer JWT
+       v
+FastAPI
+├─ routes.py: health, predict, save, stats, staff accounts
+├─ workflow_routes.py: doctor/head-worker API
+├─ ml_service.py: preprocessing + MobileNetV2
+├─ supabase_service.py: Auth/Admin/Data API
+└─ workflow_service.py: query, status, dan transisi workflow
+       │ service_role
+       v
+Supabase
+├─ Auth: app_metadata.role
+├─ PostgreSQL: workers, predictions, staff/workflow
+└─ Storage: feses-images
+```
 
-Sistem Deteksi Dini Penyakit Ayam Petelur Berbasis Citra Feses (ChickenShii)
+Pekerja tidak memiliki sesi. Ketiga role staf menggunakan form `/login` yang sama. Mobile mengendalikan pengalaman navigasi, tetapi backend dan database tetap menjadi sumber penegakan keamanan/transisi.
+
+## 2. Model data
+
+### 2.1 `workers`
+
+Menyimpan identitas pekerja kandang non-login untuk standarisasi `worker_id` saat menyimpan prediksi.
 
-1. Arsitektur Sistem (High-Level Architecture)
+| Kolom | Keterangan |
+|---|---|
+| `id` | UUID primary key. |
+| `name` | Nama pekerja. |
+| `is_active` | Menentukan kemunculan pada dropdown. |
+| `created_at` | Waktu dibuat. |
 
-Sistem menggunakan pola arsitektur Client-Server (terpisah) berbasis REST API.
+### 2.2 `predictions`
 
-Client (Mobile App): Aplikasi mobile dibangun menggunakan React Native + Expo (managed workflow), navigasi dengan Expo Router (file-based routing), dan styling menggunakan NativeWind (Tailwind CSS untuk React Native). Bertugas mengelola UI/UX, validasi input, akses kamera/galeri, dan state management.
+Menyimpan hasil AI yang dipilih pengguna untuk disimpan.
 
-Server (Backend): REST API dibangun menggunakan FastAPI (Python 3.11). Bertugas sebagai mesin utama untuk memproses request, melakukan operasi gambar, dan menjalankan inferensi machine learning. Backend bersifat platform-agnostic terhadap client yang mengaksesnya.
+| Kolom penting | Keterangan |
+|---|---|
+| `id` | UUID primary key. |
+| `image_url` | URL foto pada Storage. |
+| `prediction` | Label AI. |
+| `confidence` | Confidence kelas utama. |
+| `all_predictions` | Distribusi empat kelas. |
+| `worker_id` | Foreign key ke `workers`. |
+| `deleted_at` | Penanda soft delete Admin. |
+| `created_at` | Waktu penyimpanan. |
+
+### 2.3 `staff_profiles`
+
+Identitas tampilan akun staf yang mereferensikan `auth.users`.
+
+| Kolom | Keterangan |
+|---|---|
+| `user_id` | UUID primary/foreign key ke Auth. |
+| `full_name` | Nama staf. |
+| `email` | Email login. |
+| `role` | `admin`, `veterinarian`, atau `head_worker`. |
+| `created_at` | Waktu profil dibuat. |
+
+Role otorisasi tetap di `auth.users.raw_app_meta_data.role`; `staff_profiles.role` adalah representasi relasional yang dijaga saat provisioning.
 
-AI Model Engine: Model MobileNetV2 fine-tuned format .keras yang di-load via TensorFlow 2.16+. (Note: Preprocessing dilakukan di luar model grafis).
+### 2.4 `prediction_validations`
 
-Database & Storage: Supabase (PostgreSQL) digunakan untuk menyimpan log prediksi, dan Supabase Storage untuk menyimpan aset gambar feses.
+| Kolom | Keterangan |
+|---|---|
+| `id` | UUID primary key. |
+| `prediction_id` | Unique FK; satu validasi per prediksi. |
+| `veterinarian_id` | FK ke `staff_profiles`. |
+| `verdict` | `matching`, `incorrect`, atau `uncertain`. |
+| `corrected_prediction` | Wajib hanya untuk `incorrect`. |
+| `note` | Catatan opsional. |
+| `created_at`, `updated_at` | Audit waktu. |
 
-2. Skema Database (Supabase)
+Validasi tidak dapat dihapus. Edit mengunci `prediction_id`, validator, dan berhenti diperbolehkan setelah treatment mulai.
 
-DDL lengkap (CREATE TABLE, index, RLS policy, dan setup storage bucket) tersedia di file schema.sql, siap dijalankan langsung di Supabase SQL Editor. Bagian di bawah ini adalah deskripsi naratifnya.
+### 2.5 `prediction_followups`
 
-2.1 Tabel workers
-Digunakan untuk menyimpan daftar Pekerja Kandang yang terdaftar dan dikelola oleh Admin, sebagai sumber dropdown saat proses Simpan.
+| Kolom | Keterangan |
+|---|---|
+| `prediction_id` | Primary/foreign key ke `predictions`. |
+| `isolated_at`, `isolated_by` | Waktu dan Kepala Pekerja yang memisahkan. |
+| `treatment_started_at`, `treatment_started_by` | Audit mulai penanganan. |
+| `treatment_completed_at`, `treatment_completed_by` | Audit selesai. |
+| `closed_at`, `close_reason`, `closed_by` | Penutupan otomatis koreksi Healthy. |
+| `created_at`, `updated_at` | Audit waktu. |
 
-Kolom
+Setiap pasangan waktu/aktor harus sama-sama null atau sama-sama terisi.
 
-Tipe Data
+## 3. Trigger dan konsistensi transaksi
 
-Keterangan
+1. Endpoint simpan membatasi label ke empat kelas model dan mengembalikan `422` untuk label lain. `predictions_create_followup` berjalan setelah insert dan hanya membuat follow-up untuk `Coccidiosis`, `New Castle Disease`, atau `Salmonellosis`; `Healthy` dilewati. Karena tidak ada perintah backfill, data sebelum migration tetap di luar workflow.
+2. `prediction_validations_enforce_workflow` memastikan target punya follow-up, validator adalah `veterinarian`, koreksi valid dan berbeda, serta edit belum terkunci.
+3. Unique constraint menjadikan validasi pertama pemenang saat dua dokter menyimpan bersamaan.
+4. `prediction_validations_sync_followup` menutup kasus ketika koreksi `Healthy` dan dapat membuka kembali penutupan tersebut bila koreksi diedit sebelum treatment.
+5. `prediction_followups_enforce_ordering` mensyaratkan pemisahan dan validasi definitif sebelum treatment, lalu treatment start sebelum complete.
 
-Atribut
+Status API dihitung dari kombinasi kolom tersebut: `pending_isolation`, `pending_validation`, `requires_examination`, `ready_for_treatment`, `active_treatment`, `treatment_completed`, atau `auto_closed`.
 
-id
+## 4. Autentikasi dan otorisasi
 
-UUID
+`_require_role()` mengambil Bearer token, memverifikasi user ke Supabase, lalu membandingkan role dengan exact role endpoint. Mapping mobile:
 
-Primary Key unik setiap pekerja.
+| `app_metadata.role` | Route |
+|---|---|
+| `admin` | `/admin` |
+| `veterinarian` | `/doctor` |
+| `head_worker` | `/head-worker` |
 
-PK, Default uuid_generate_v4()
+Role tidak dikenal tidak mempunyai mapping dan session diakhiri. Existing Auth users diberi role Admin dan `staff_profiles` saat migration agar akses lama tetap berfungsi.
 
-name
+Mobile memisahkan dua client HTTP. `services/api.ts` hanya digunakan alur pekerja anonim dan `baseURL`-nya boleh mengikuti URL khusus dari Pengaturan; client ini tidak membaca sesi Supabase maupun memasang Bearer token. Seluruh endpoint staf memakai `services/staffApi.ts` dengan `baseURL` tetap `API_URL`. Interceptor `staffApi` memasang token hanya bila origin tujuan sama persis dengan origin bawaan dan menghapus `Authorization` untuk tujuan asing atau URL tidak valid.
 
-TEXT
+## 5. API contract
 
-Nama Pekerja Kandang.
+### 5.1 Publik/anonim
 
-Not Null
+| Method | Endpoint | Input/hasil |
+|---|---|---|
+| `GET` | `/`, `/api/v1/health` | Status model. |
+| `POST` | `/api/v1/predict` | Multipart `file`; menghasilkan kelas, confidence, threshold, probabilitas, rekomendasi, disclaimer. |
+| `POST` | `/api/v1/predictions` | Multipart `file`, `prediction`, `confidence`, `all_predictions`, `worker_id`; menyimpan foto/prediksi. |
 
-is_active
+### 5.2 Admin
 
-BOOLEAN
+| Method | Endpoint | Kontrak |
+|---|---|---|
+| `GET` | `/api/v1/stats?period=week|month|year&reference_date=YYYY-MM-DD` | Statistik kelas pada rentang backend. |
+| `POST` | `/api/v1/staff-accounts` | JSON `full_name`, `email`, `password`, `role`; role hanya `veterinarian`/`head_worker`. |
 
-Menentukan apakah pekerja masih muncul di dropdown pemilihan nama.
+Response akun staf memuat `id`, `full_name`, `email`, `role`, dan `created_at`. Provisioning membuat Auth user dengan role di app metadata dan baris `staff_profiles`. Respons duplikat eksplisit dari Supabase selalu menghasilkan konflik HTTP `409` tanpa rekonsiliasi. Rekonsiliasi identitas deterministik hanya dipakai saat hasil pembuatan tidak pasti, seperti timeout, respons `5xx`, atau respons sukses yang tidak dapat dibaca.
 
-Not Null, Default true
+### 5.3 Dokter Hewan
 
-created_at
+| Method | Endpoint | Kontrak |
+|---|---|---|
+| `GET` | `/api/v1/doctor/validations/pending` | Filter opsional `disease`, `date_from`, `date_to`, `limit`, `offset`. |
+| `GET` | `/api/v1/doctor/validations/history` | Filter opsional `verdict`, penyakit/tanggal/pagination; scope user token. |
+| `POST` | `/api/v1/doctor/validations` | `prediction_id`, `verdict`, `corrected_prediction?`, `note?`. |
+| `PATCH` | `/api/v1/doctor/validations/{validation_id}` | Memperbarui verdict/koreksi/catatan milik sendiri. |
 
-TIMESTAMPTZ
+### 5.4 Kepala Pekerja
 
-Waktu pekerja didaftarkan.
+| Method | Endpoint | Kontrak |
+|---|---|---|
+| `GET` | `/api/v1/head-worker/dashboard` | Empat count hari ini dan `latest_cases`. |
+| `GET` | `/api/v1/head-worker/follow-ups` | Filter opsional `status`, `disease`, tanggal, limit, offset. |
+| `POST` | `/api/v1/head-worker/follow-ups/{prediction_id}/isolate` | Isi audit pemisahan dari token. |
+| `POST` | `/api/v1/head-worker/follow-ups/{prediction_id}/treatment/start` | Memulai bila syarat terpenuhi. |
+| `POST` | `/api/v1/head-worker/follow-ups/{prediction_id}/treatment/complete` | Menyelesaikan treatment aktif. |
 
-Default NOW()
+Response workflow memakai envelope `status` dan `data`. Item dapat memuat data AI, validasi, label efektif, status, rekomendasi, audit follow-up, serta flag `editable`.
 
-2.2 Tabel predictions
-Digunakan untuk menyimpan riwayat setiap prediksi yang berhasil dilakukan oleh sistem.
+## 6. RLS dan Data API
 
-Kolom
+- Ketiga tabel staf/workflow mengaktifkan RLS dan mencabut semua privilege dari `anon`/`authenticated`.
+- Privilege eksplisit diberikan kepada `service_role`; akses workflow selalu melalui backend.
+- `workers`: anonim hanya membaca pekerja aktif, authenticated dapat membaca daftar, Admin saja yang melakukan mutasi.
+- `predictions`: policy client authenticated dibatasi Admin. Jalur pekerja menyimpan melalui backend.
+- Secret service role hanya berada pada environment backend.
 
-Tipe Data
+## 7. Desain navigasi mobile
 
-Keterangan
-
-Atribut
-
-id
-
-UUID
-
-Primary Key unik setiap prediksi.
-
-PK, Default uuid_generate_v4()
-
-image_url
-
-TEXT
-
-URL gambar yang disimpan di bucket Supabase.
-
-Not Null
-
-prediction
-
-TEXT
-
-Hasil kelas utama (contoh: "Salmonellosis").
-
-Not Null
-
-confidence
-
-FLOAT8
-
-Skor akurasi utama (0.0 - 100.0).
-
-Not Null
-
-all_predictions
-
-JSONB
-
-Data probabilitas keempat kelas penyakit.
-
-Not Null
-
-worker_id
-
-UUID
-
-Referensi ke Pekerja Kandang yang mengambil gambar.
-
-FK -> workers.id, Not Null
-
-deleted_at
-
-TIMESTAMPTZ
-
-Penanda soft delete. NULL berarti entri masih aktif/tampil.
-
-Nullable, Default NULL
-
-created_at
-
-TIMESTAMPTZ
-
-Waktu prediksi disimpan.
-
-Default NOW()
-
-Relasi: satu workers dapat memiliki banyak predictions (one-to-many via worker_id). Seluruh query riwayat, statistik, dan export CSV wajib menyertakan kondisi WHERE deleted_at IS NULL agar entri yang sudah dihapus (soft delete) tidak ikut ditampilkan/dihitung.
-
-2.3 Storage Bucket
-
-Nama Bucket: feses-images
-
-Visibilitas: Publik (untuk read image URL di dashboard admin).
-
-Policy: Hanya backend terotorisasi yang dapat melakukan INSERT (upload) ke bucket ini.
-
-2.4 Row Level Security (RLS)
-
-Tabel workers: role anon (Pekerja Kandang, tanpa login) hanya bisa SELECT baris dengan is_active = true — cukup untuk mengisi dropdown saat Simpan. Role authenticated (Admin yang sudah login) bisa SELECT seluruh baris (termasuk yang nonaktif) serta INSERT dan UPDATE (untuk menambah/menonaktifkan pekerja).
-
-Tabel predictions: SELECT dan UPDATE (dipakai untuk soft delete, mengubah kolom deleted_at) hanya diizinkan untuk role authenticated. INSERT ke tabel ini tidak dilakukan langsung oleh client manapun — selalu melalui backend (endpoint POST /api/v1/predictions) yang memakai service role key, sehingga proses insert tidak bergantung pada RLS.
-
-Pembacaan riwayat, pencarian/filter, dan soft delete pada dashboard Admin dilakukan lewat pemanggilan langsung ke Supabase (Supabase JS SDK) dari aplikasi mobile, bukan lewat endpoint FastAPI tambahan — konsisten dengan pola yang sama dipakai untuk membaca tabel predictions pada Dashboard Admin.
-
-3. API Contract (Spesifikasi Endpoint Backend)
-
-Selain endpoint di bawah ini, operasi baca/tulis pada tabel workers dan predictions untuk kebutuhan Dashboard Admin (riwayat, pencarian/filter, soft delete, manajemen pekerja) dilakukan langsung lewat Supabase JS SDK dari aplikasi mobile, mengikuti RLS pada bagian 2.4. Backend FastAPI hanya menangani proses yang memerlukan ML inference dan penulisan ke Storage.
-
-3.1. GET / (Health Check)
-
-Fungsi: Memastikan API menyala dan model berhasil di-load ke dalam memori.
-
-Response (200 OK):
-
-{
-  "status": "online",
-  "model_loaded": true,
-  "classes": ["Coccidiosis", "Healthy", "New Castle Disease", "Salmonellosis"]
-}
-
-
-3.2. POST /api/v1/predict (Inference Only — Tidak Menyimpan)
-
-Fungsi: Menerima unggahan gambar hasil crop, memprosesnya, dan mengembalikan hasil prediksi beserta knowledge base terkait. Endpoint ini murni inference — tidak melakukan upload ke Storage maupun insert ke Database.
-
-Request: multipart/form-data
-
-file: (File image hasil crop: jpg/png/jpeg)
-
-Response (200 OK):
-
-{
-  "status": "success",
-  "data": {
-    "prediction": "Salmonellosis",
-    "confidence": 96.42,
-    "all_predictions": {
-      "Coccidiosis": 0.12,
-      "Healthy": 2.31,
-      "New Castle Disease": 1.15,
-      "Salmonellosis": 96.42
-    },
-    "recommendation_data": {
-      "description": "...",
-      "cause": "...",
-      "immediate_action": ["..."]
-    },
-    "confidence_threshold": 60.0,
-    "note": "Hasil ini merupakan dugaan awal AI..."
-  }
-}
-
-Catatan: confidence_threshold dikirim dari backend (bukan di-hardcode di client) agar ambang batas peringatan "hasil kurang meyakinkan" mudah diubah tanpa perlu rilis ulang aplikasi mobile. Aplikasi menampilkan catatan tambahan pada Layar Hasil apabila confidence < confidence_threshold.
-
-
-3.3. POST /api/v1/predictions (Simpan Hasil ke Riwayat)
-
-Fungsi: Dipanggil hanya ketika Pekerja Kandang menekan tombol "Simpan" pada Layar Hasil. Mengunggah gambar ke Storage dan mencatat hasil prediksi beserta referensi pekerja ke tabel predictions.
-
-Request: multipart/form-data
-
-file: (File image yang sama dengan yang dipakai saat /predict)
-
-prediction: (string, hasil kelas dari respons /predict)
-
-confidence: (float)
-
-all_predictions: (JSON string)
-
-worker_id: (UUID, hasil pilihan dropdown Pekerja Kandang — wajib diisi)
-
-Backend memvalidasi worker_id benar-benar ada di tabel workers dan is_active = true sebelum melakukan insert. Jika tidak ditemukan/nonaktif, backend mengembalikan 400 Bad Request agar client meminta pengguna memilih ulang dari dropdown (menghindari kondisi race, misal pekerja baru saja dinonaktifkan Admin di waktu yang bersamaan).
-
-Response (201 Created):
-
-{
-  "status": "success",
-  "data": {
-    "id": "uuid-generated",
-    "image_url": "https://.../feses-images/xxx.jpg",
-    "worker_id": "uuid-worker",
-    "worker_name": "Budi",
-    "created_at": "2026-07-10T10:00:00Z"
-  }
-}
-
-400 Bad Request: Dikembalikan jika worker_id kosong, tidak valid, tidak ditemukan, atau merujuk ke pekerja yang sudah dinonaktifkan.
-
-
-3.4. GET /api/v1/stats (Statistik Dashboard Admin — Protected)
-
-Fungsi: Mengembalikan jumlah prediksi per kelas penyakit dalam rentang periode tertentu. Endpoint ini memerlukan header Authorization: Bearer <supabase_jwt> dan hanya bisa diakses oleh Admin yang sudah login.
-
-Request: GET /api/v1/stats?period=week|month|year&reference_date=YYYY-MM-DD
-
-period: wajib, salah satu dari week, month, year.
-
-reference_date: opsional (default: tanggal hari ini) — dipakai untuk menentukan minggu/bulan/tahun mana yang dihitung. Contoh: period=month&reference_date=2026-03-15 menghitung seluruh data pada bulan Maret 2026.
-
-Response (200 OK):
-
-{
-  "status": "success",
-  "data": {
-    "period": "month",
-    "range": { "start": "2026-03-01", "end": "2026-03-31" },
-    "total": 128,
-    "by_class": {
-      "Coccidiosis": 34,
-      "Healthy": 52,
-      "New Castle Disease": 12,
-      "Salmonellosis": 30
-    }
-  }
-}
-
-Catatan: Agregasi wajib mengecualikan baris dengan deleted_at IS NOT NULL (entri yang sudah di-soft-delete Admin).
-
-
-401 Unauthorized: Dikembalikan jika token tidak ada/tidak valid/kedaluwarsa.
-
-400 Bad Request: Dikembalikan jika period bukan salah satu dari week/month/year, atau reference_date tidak valid.
-
-
-Struktur utama (root) proyek dibagi menjadi tiga bagian utama. Dilarang keras menumpuk seluruh logika di main.py. Gunakan pemisahan peran (separation of concerns) berikut:
-
+```text
 /
-├── panduan/       # Dokumen spesifikasi (PRD, SRS, SDD, Task Breakdown)
-├── mobile/        # Proyek React Native (Expo)
-└── backend/       # Proyek FastAPI
-    ├── app/
-    │   ├── main.py                  # Entry point (Uvicorn), setup FastAPI & CORS.
-    │   ├── api/
-    │   │   └── routes.py            # Definisi endpoint (GET /, POST /predict, POST /predictions, GET /stats).
-    │   ├── core/
-    │   │   └── config.py            # Konfigurasi env (Supabase keys, model path).
-    │   ├── services/
-    │   │   ├── ml_service.py        # Logika load model, resize Pillow, inferensi TF.
-    │   │   └── supabase_service.py  # Logika upload gambar, validasi worker_id, insert log ke DB, & agregasi statistik per periode.
-    │   └── utils/
-    │       └── knowledge_base.py    # Dictionary statis informasi penyakit (diseaseInfo).
-    ├── models/
-    │   └── mobilenetv2_finetuned.keras # File bobot model (TANPA Lambda layer).
-    └── requirements.txt
+├─ result
+├─ login
+├─ admin
+│  └─ tabs: Dashboard | Riwayat | Pengguna
+├─ doctor
+│  └─ tabs: Validasi | Riwayat
+└─ head-worker
+   └─ tabs: Dashboard | Tindak Lanjut
+```
 
-4.1 Struktur Direktori mobile/ (Expo Router)
+`RoleGuard` membungkus area terlindungi. Detail dan formulir Dokter/Kepala Pekerja adalah modal, bukan route/tab tambahan. `/admin/login` hanya redirect ke `/login` untuk kompatibilitas.
 
-mobile/
-├── app/
-│   ├── _layout.tsx               # Root layout, provider (auth context, theme)
-│   ├── index.tsx                 # Home screen Pekerja Kandang (upload & result)
-│   └── admin/
-│       ├── _layout.tsx           # Guard/layout khusus grup admin (cek sesi)
-│       ├── login.tsx             # Screen login Admin
-│       ├── index.tsx             # Dashboard Admin (protected) — statistik & riwayat
-│       └── workers.tsx           # Manajemen Pekerja Kandang (protected) — tambah/nonaktifkan
-├── components/
-│   ├── ImagePickerArea.tsx       # Pilih kamera/galeri + trigger native crop (allowsEditing)
-│   ├── LoadingOverlay.tsx        # Modal + ActivityIndicator (cold start aware)
-│   ├── UploadedImageCard.tsx     # Kartu preview foto yang diupload di Layar Hasil
-│   ├── ConfidenceBarChart.tsx    # Chart probabilitas (react-native-chart-kit / victory-native)
-│   ├── LowConfidenceWarning.tsx  # Catatan tambahan saat confidence < confidence_threshold
-│   ├── DiseaseInfoCard.tsx       # Kartu penjelasan penyakit
-│   ├── DiseaseCauseCard.tsx      # Kartu penyebab penyakit
-│   ├── RecommendationCard.tsx    # Kartu rekomendasi penanganan awal
-│   ├── ResultActions.tsx         # Tombol Reset/Ulangi & Simpan
-│   ├── SaveWorkerModal.tsx       # Modal dropdown pilih Pekerja Kandang aktif sebelum submit simpan
-│   ├── RetrySaveBanner.tsx       # Muncul saat POST /predictions gagal, tombol "Coba Lagi"
-│   ├── DisclaimerBanner.tsx      # Disclaimer medis permanen
-│   ├── StatsPeriodFilter.tsx     # Segmented control/dropdown filter Mingguan/Bulanan/Tahunan
-│   ├── StatsSummaryChart.tsx     # Chart jumlah kasus per kelas penyakit sesuai periode terpilih
-│   ├── HistorySearchFilterBar.tsx # Input pencarian + filter (nama pekerja, kelas penyakit, rentang tanggal)
-│   ├── HistoryListItem.tsx       # Baris riwayat dengan aksi hapus (soft delete + konfirmasi)
-│   └── WorkerListManager.tsx     # Form tambah pekerja + toggle is_active per baris
-├── services/
-│   ├── api.ts                    # Axios instance ke backend FastAPI
-│   └── supabase.ts               # Supabase client (Auth + query langsung) untuk mobile
-├── utils/
-│   └── diseaseInfo.ts            # Knowledge base statis (versi TypeScript)
-├── constants/
-│   └── env.ts                    # Baca EXPO_PUBLIC_API_URL, dsb.
-├── app.json / app.config.ts      # Konfigurasi Expo
-├── eas.json                      # Konfigurasi build (EAS Build)
-└── package.json
+## 8. Data flow utama
 
-5. Frontend UI/UX Flow (Expo Router)
+### Deteksi
 
-Sistem navigasi diimplementasikan secara file-based menggunakan Expo Router:
+`Foto → validasi client → POST /predict → validasi/preprocess backend → MobileNetV2 → hasil + knowledge base → mobile`.
 
-app/index.tsx (Public Screen): Halaman Home untuk Pekerja Kandang. Mengelola 2 state utama secara berurutan dalam satu screen: (1) state upload — area pilih/ambil foto via ImagePickerArea.tsx yang otomatis membuka native crop tool, lalu tombol "Deteksi" memicu LoadingOverlay.tsx dan panggilan POST /predict; (2) state hasil — merender UploadedImageCard.tsx, ConfidenceBarChart.tsx (dengan LowConfidenceWarning.tsx apabila confidence < confidence_threshold dari respons), DiseaseInfoCard.tsx, DiseaseCauseCard.tsx, RecommendationCard.tsx, DisclaimerBanner.tsx, dan ResultActions.tsx (tombol Reset/Ulangi mengembalikan ke state upload; tombol Simpan membuka SaveWorkerModal.tsx yang mengambil daftar Pekerja Kandang aktif langsung dari Supabase, lalu setelah dikonfirmasi memanggil POST /predictions). Jika POST /predictions gagal, tampilkan RetrySaveBanner.tsx tanpa mengubah state hasil yang sudah ada.
+### Simpan dan workflow
 
-app/admin/login.tsx (Public Screen): Halaman form masuk Admin (Email & Password). Menyimpan token sesi Supabase menggunakan expo-secure-store, yang memanfaatkan Keychain (iOS) dan Keystore (Android) agar token tersimpan terenkripsi di level OS.
+`Simpan + worker_id → backend → Storage → predictions → trigger penyakit? → prediction_followups`.
 
-app/admin/index.tsx (Protected Screen): Halaman Dashboard yang digerbangi lewat _layout.tsx pada grup admin — melakukan pengecekan sesi (via expo-secure-store) sebelum merender. Terdiri dari: (1) StatsPeriodFilter.tsx untuk memilih periode Mingguan/Bulanan/Tahunan (plus pilihan bulan/tahun spesifik), yang memanggil GET /api/v1/stats dan menampilkan hasilnya lewat StatsSummaryChart.tsx; (2) HistorySearchFilterBar.tsx untuk mencari/memfilter riwayat berdasarkan nama pekerja, kelas penyakit, dan rentang tanggal; (3) daftar riwayat prediksi (FlatList dari HistoryListItem.tsx) yang mengambil data langsung dari tabel predictions di Supabase (WHERE deleted_at IS NULL, ditambah kondisi hasil pencarian/filter), dengan aksi hapus (soft delete, dengan dialog konfirmasi) pada tiap baris. Terdapat tautan menuju app/admin/workers.tsx.
+### Validasi dan tindak lanjut
 
-app/admin/workers.tsx (Protected Screen): Halaman manajemen Pekerja Kandang, berisi WorkerListManager.tsx — form tambah nama pekerja baru, dan daftar pekerja terdaftar dengan toggle is_active per baris untuk menonaktifkan/mengaktifkan kembali.
+`Dokter POST/PATCH validation → constraint/trigger → label efektif/status → Kepala Pekerja isolate/start/complete → constraint urutan → audit trail`.
+
+## 9. Keputusan desain tetap
+
+- Rekomendasi tidak dihapus dan mengikuti koreksi dokter.
+- Admin tidak mendapat halaman/data workflow dan CSV tidak berubah menjadi export workflow.
+- Tidak ada halaman profil, push notification, identitas ayam, atau identitas kandang.
+- Validasi hanya menilai prediksi penyakit, sehingga tidak dipakai sebagai matriks akurasi seluruh kelas model.

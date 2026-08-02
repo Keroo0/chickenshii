@@ -5,6 +5,11 @@ from pydantic import BaseModel, Field, field_validator
 from typing import Dict, Literal, Optional
 
 
+PredictionClass = Literal[
+    "Coccidiosis", "Healthy", "New Castle Disease", "Salmonellosis"
+]
+
+
 class RecommendationData(BaseModel):
     description: str = Field(..., description="Penjelasan medis penyakit")
     cause: str = Field(..., description="Penyebab penyakit")
@@ -12,7 +17,7 @@ class RecommendationData(BaseModel):
 
 
 class PredictionResponse(BaseModel):
-    prediction: str = Field(..., alias="class_name", description="Nama penyakit yang terdeteksi")
+    prediction: PredictionClass = Field(..., alias="class_name", description="Nama penyakit yang terdeteksi")
     confidence: float = Field(..., description="Persentase tingkat keyakinan AI (0-100)")
     confidence_threshold: float = Field(..., description="Batas minimal keyakinan sebelum memunculkan peringatan (Low Confidence)")
     all_predictions: Dict[str, float] = Field(..., alias="probabilities", description="Distribusi probabilitas dari keempat kelas")

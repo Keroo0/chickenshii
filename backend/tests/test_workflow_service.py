@@ -10,6 +10,7 @@ from app.services.workflow_service import (
     WorkflowNotFoundError,
     WorkflowSemanticError,
     WorkflowUpstreamError,
+    _read_in_chunks,
     build_dashboard,
     create_validation,
     derive_status,
@@ -400,9 +401,130 @@ def test_pending_query_uses_parameterized_filters_and_returns_unvalidated(monkey
     assert result[0]["validation"] is None
     prediction_params = client.calls[1][2]["params"]
     assert ("prediction", "eq.Coccidiosis") in prediction_params
-    assert ("created_at", "gte.2026-08-01T00:00:00+00:00") in prediction_params
-    assert ("created_at", "lt.2026-08-03T00:00:00+00:00") in prediction_params
+    assert ("created_at", "gte.2026-07-31T17:00:00+00:00") in prediction_params
+    assert ("created_at", "lt.2026-08-02T17:00:00+00:00") in prediction_params
     assert ("deleted_at", "is.null") in prediction_params
+
+
+def test_user_date_filters_use_jakarta_boundaries_for_all_lists(monkeypatch):
+    # Pending: follow-up, prediction, validation, worker.
+    pending_client = FakeClient(service_read_responses())
+    get_client = Mock(return_value=pending_client)
+    monkeypatch.setattr(
+        "app.services.workflow_service.supabase_service._get_client", get_client
+    )
+    list_pending_validations(
+        date_from=date(2026, 8, 2), date_to=date(2026, 8, 2)
+    )
+    pending_prediction_params = pending_client.calls[1][2]["params"]
+
+    # History: validation, follow-up, prediction, worker.
+    history_client = FakeClient(
+        [
+            FakeResponse(200, [validation()]),
+            FakeResponse(200, [followup()]),
+            FakeResponse(200, [prediction()]),
+            FakeResponse(200, [{"id": WORKER_ID, "name": "Budi"}]),
+        ]
+    )
+    get_client.return_value = history_client
+    list_validation_history(
+        veterinarian_id="vet-1",
+        date_from=date(2026, 8, 2),
+        date_to=date(2026, 8, 2),
+    )
+    history_prediction_params = history_client.calls[2][2]["params"]
+
+    # Follow-ups: follow-up, prediction, validation, worker.
+    followup_client = FakeClient(service_read_responses())
+    get_client.return_value = followup_client
+    list_followups(date_from=date(2026, 8, 2), date_to=date(2026, 8, 2))
+    followup_prediction_params = followup_client.calls[1][2]["params"]
+
+    for params in (
+        pending_prediction_params,
+        history_prediction_params,
+        followup_prediction_params,
+    ):
+        assert ("created_at", "gte.2026-08-01T17:00:00+00:00") in params
+        assert ("created_at", "lt.2026-08-02T17:00:00+00:00") in params
+
+
+def test_dependent_reads_chunk_more_than_100_ids(monkeypatch):
+    ids = [f"prediction-{index}" for index in range(205)]
+    client = FakeClient(
+        [FakeResponse(200, []), FakeResponse(200, []), FakeResponse(200, [])]
+    )
+
+    assert _read_in_chunks(
+        client,
+        "/prediction_validations",
+        id_column="prediction_id",
+        ids=ids,
+        select="id,prediction_id",
+    ) == []
+
+    assert len(client.calls) == 3
+    chunk_sizes = []
+    for _, _, kwargs in client.calls:
+        params = kwargs["params"]
+        in_value = params["prediction_id"]
+        chunk_sizes.append(len(in_value.removeprefix("in.(").removesuffix(")").split(",")))
+        assert params["limit"] == "100"
+    assert chunk_sizes == [100, 100, 5]
+
+
+def test_pending_scan_fills_page_after_full_validated_batch(monkeypatch):
+    first_ids = [f"validated-{index}" for index in range(100)]
+    pending_ids = ["pending-1", "pending-2"]
+    first_followups = [followup(prediction_id) for prediction_id in first_ids]
+    first_predictions = [prediction(prediction_id) for prediction_id in first_ids]
+    first_validations = [validation(prediction_id) for prediction_id in first_ids]
+    second_followups = [followup(prediction_id) for prediction_id in pending_ids]
+    second_predictions = [prediction(prediction_id) for prediction_id in pending_ids]
+    client = FakeClient(
+        [
+            FakeResponse(200, first_followups),
+            FakeResponse(200, first_predictions),
+            FakeResponse(200, first_validations),
+            FakeResponse(200, [{"id": WORKER_ID, "name": "Budi"}]),
+            FakeResponse(200, second_followups),
+            FakeResponse(200, second_predictions),
+            FakeResponse(200, []),
+            FakeResponse(200, [{"id": WORKER_ID, "name": "Budi"}]),
+        ]
+    )
+    monkeypatch.setattr(
+        "app.services.workflow_service.supabase_service._get_client",
+        Mock(return_value=client),
+    )
+
+    result = list_pending_validations(limit=2, offset=0)
+
+    assert {item["prediction_id"] for item in result} == set(pending_ids)
+    driving_calls = [call for call in client.calls if call[1] == "/prediction_followups"]
+    assert driving_calls[0][2]["params"][-2:] == [
+        ("limit", "100"),
+        ("offset", "0"),
+    ]
+    assert driving_calls[1][2]["params"][-2:] == [
+        ("limit", "100"),
+        ("offset", "100"),
+    ]
+
+
+def test_default_list_query_has_explicit_bounded_driver_pagination(monkeypatch):
+    client = FakeClient(service_read_responses())
+    monkeypatch.setattr(
+        "app.services.workflow_service.supabase_service._get_client",
+        Mock(return_value=client),
+    )
+
+    list_followups()
+
+    driver_params = client.calls[0][2]["params"]
+    assert ("limit", "100") in driver_params
+    assert ("offset", "0") in driver_params
 
 
 def test_pending_query_removes_predictions_with_existing_validation(monkeypatch):
@@ -656,18 +778,93 @@ def test_list_followups_filters_derived_status_and_effective_disease(monkeypatch
 
 
 def test_get_dashboard_uses_today_filter(monkeypatch):
-    client = FakeClient(service_read_responses())
+    legacy_id = "legacy-no-followup"
+    client = FakeClient(
+        [
+            FakeResponse(200, [prediction(), prediction(legacy_id)]),
+            FakeResponse(200, [followup()]),
+            FakeResponse(200, []),
+            FakeResponse(200, [{"id": WORKER_ID, "name": "Budi"}]),
+        ]
+    )
     monkeypatch.setattr(
         "app.services.workflow_service.supabase_service._get_client",
         Mock(return_value=client),
+    )
+    historical_scanner = Mock(
+        side_effect=AssertionError("dashboard must not scan historical follow-ups")
+    )
+    monkeypatch.setattr(
+        "app.services.workflow_service._scan_followup_items", historical_scanner
     )
 
     result = get_dashboard(today=date(2026, 8, 2))
 
     assert result["counts"]["total_disease_cases"] == 1
-    prediction_params = client.calls[1][2]["params"]
+    assert [item["prediction_id"] for item in result["latest_cases"]] == [
+        PREDICTION_ID
+    ]
+    assert client.calls[0][1] == "/predictions"
+    prediction_params = client.calls[0][2]["params"]
+    assert ("deleted_at", "is.null") in prediction_params
+    assert ("prediction", "neq.Healthy") in prediction_params
     assert ("created_at", "gte.2026-08-01T17:00:00+00:00") in prediction_params
     assert ("created_at", "lt.2026-08-02T17:00:00+00:00") in prediction_params
+    assert ("limit", "100") in prediction_params
+    assert ("offset", "0") in prediction_params
+    followup_calls = [call for call in client.calls if call[1] == "/prediction_followups"]
+    assert len(followup_calls) == 1
+    assert "legacy-no-followup" in followup_calls[0][2]["params"]["prediction_id"]
+    historical_scanner.assert_not_called()
+
+
+def test_dashboard_pages_only_date_filtered_predictions_and_keeps_latest_five(
+    monkeypatch,
+):
+    first_ids = [f"today-{index:03d}" for index in range(100)]
+    second_id = "today-100"
+    first_predictions = [
+        prediction(
+            prediction_id,
+            created_at=f"2026-08-02T{16 - (index // 60):02d}:{59 - (index % 60):02d}:00Z",
+        )
+        for index, prediction_id in enumerate(first_ids)
+    ]
+    second_prediction = prediction(
+        second_id, created_at="2026-08-01T17:30:00Z"
+    )
+    client = FakeClient(
+        [
+            FakeResponse(200, first_predictions),
+            FakeResponse(200, [followup(value) for value in first_ids]),
+            FakeResponse(200, []),
+            FakeResponse(200, [{"id": WORKER_ID, "name": "Budi"}]),
+            FakeResponse(200, [second_prediction]),
+            FakeResponse(200, [followup(second_id)]),
+            FakeResponse(200, []),
+            FakeResponse(200, [{"id": WORKER_ID, "name": "Budi"}]),
+        ]
+    )
+    monkeypatch.setattr(
+        "app.services.workflow_service.supabase_service._get_client",
+        Mock(return_value=client),
+    )
+
+    dashboard = get_dashboard(today=date(2026, 8, 2))
+
+    prediction_calls = [call for call in client.calls if call[1] == "/predictions"]
+    assert len(prediction_calls) == 2
+    assert prediction_calls[0][2]["params"][-2:] == [
+        ("limit", "100"),
+        ("offset", "0"),
+    ]
+    assert prediction_calls[1][2]["params"][-2:] == [
+        ("limit", "100"),
+        ("offset", "100"),
+    ]
+    assert dashboard["counts"]["total_disease_cases"] == 101
+    assert len(dashboard["latest_cases"]) == 5
+    assert dashboard["latest_cases"][0]["prediction_id"] == "today-000"
 
 
 def merged_case(**followup_overrides):

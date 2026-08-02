@@ -2,38 +2,53 @@
 
 ## Register
 
-product
+ChickenShii adalah aplikasi mobile pendukung keputusan untuk peternakan ayam petelur. Pengguna mengambil foto feses, menerima dugaan awal AI, dan—untuk kasus penyakit baru—menjalankan validasi dokter serta tindak lanjut operasional.
 
-## Users
+## Users and routes
 
-Peternak ayam dan dokter hewan yang membutuhkan alat bantu deteksi penyakit ayam secara cepat melalui foto feses. Konteks penggunaan: di kandang atau klinik, saat memeriksa kesehatan ternak, membutuhkan hasil instan tanpa analisis laboratorium.
+| Pengguna | Akses | Route utama | Navigasi |
+|---|---|---|---|
+| Pekerja Kandang | Anonim | `/` | Deteksi dan hasil |
+| Admin | Login | `/admin` | Dashboard, Riwayat, Pengguna |
+| Dokter Hewan | Login | `/doctor` | Tepat dua tab: Validasi, Riwayat |
+| Kepala Pekerja | Login | `/head-worker` | Tepat dua tab: Dashboard, Tindak Lanjut |
 
-## Product Purpose
+Semua staf menggunakan `/login`. Role berasal dari `app_metadata`; role tidak dikenal harus logout dan ditolak. `/admin/login` hanya merupakan redirect kompatibilitas, bukan formulir login kedua. Tidak ada halaman profil.
 
-Aplikasi mobile untuk deteksi penyakit ayam menggunakan AI (MobileNetV2) berdasarkan foto feses. Memungkinkan identifikasi Coccidiosis, Salmonellosis, New Castle Disease, dan kondisi sehat dalam hitungan detik. Keberhasilan: peternak dapat mengambil tindakan awal yang tepat sebelum berkonsultasi dengan dokter hewan.
+## Product purpose
 
-## Brand Personality
+Tujuan utama adalah mempercepat deteksi dan respons awal tanpa menyatakan AI sebagai diagnosis. Pekerja mendapat alur satu foto–satu hasil–simpan. Dokter memberi keputusan profesional. Kepala pekerja memastikan ayam segera dipisahkan dan penanganan berlangsung dalam urutan yang aman. Admin mengelola data prediksi dan pengguna, tetapi tidak melihat atau mengekspor data workflow.
 
-Modern, fun, approachable. Seperti aplikasi peternakan generasi baru — tidak klinis atau intimidating, tapi tetap terpercaya dan profesional. Warna-warna cerah tapi tidak norak, UI yang clean tapi tidak membosankan.
+## Workflow experience
+
+- Hanya prediksi penyakit baru masuk workflow; `Healthy` dan data lama tidak ditampilkan.
+- Kepala pekerja dapat menandai `Sudah dipisahkan` segera setelah deteksi.
+- Dokter memilih `Sesuai`, `Tidak sesuai`, atau `Tidak dapat dipastikan`; label koreksi wajib saat tidak sesuai.
+- Penanganan hanya aktif setelah kasus dipisahkan dan validasi memastikan penyakit.
+- Koreksi ke `Healthy` menutup kasus; ketidakpastian menampilkan `Perlu pemeriksaan lebih lanjut` dan memblokir penanganan.
+- Rekomendasi tetap terlihat dan mengikuti label koreksi dokter.
+- Detail, validasi, dan konfirmasi tindakan menggunakan modal agar role baru tetap dua tab.
+
+## Brand personality
+
+Hangat, ramah, optimistis, dan dapat dipercaya. Antarmuka harus jelas dipakai di kandang, namun penanganan medis harus disampaikan hati-hati dan tidak memberi kesan AI menggantikan dokter.
 
 ## Anti-references
 
-- Tampilan klinik rumah sakit yang steril dan dingin
-- Aplikasi pertanian tua dengan UI gray/brown kuno
-- Dashboard enterprise yang overwhelming dengan data
-- Neon purple/blue AI aesthetic yang sudah saturated
-- Warm cream/beige "organic" aesthetic yang generic
+- Bukan aplikasi diagnosis final.
+- Bukan sistem generatif/LLM untuk rekomendasi medis.
+- Bukan sistem identifikasi individu ayam atau kandang.
+- Bukan platform notifikasi push atau manajemen akun lengkap.
+- Bukan dashboard padat informasi untuk pekerja lapangan.
 
-## Design Principles
+## Design principles
 
-1. **Instant Clarity** — Pengguna harus langsung tahu cara pakai tanpa belajar. Satu foto, satu hasil, satu tindakan.
-2. **Trust Through Simplicity** — Kesederhanaan UI membangun kepercayaan. Tidak perlu banyak opsi untuk satu tugas.
-3. **Fun but Functional** — Warna dan mikro-interaksi yang menyenangkan, tapi tidak mengorbankan fungsionalitas.
-4. **Mobile-First Utility** — Dirancang untuk dipakai di kandang, dengan satu tangan, di bawah sinar matahari.
+1. **Instant Clarity** — satu tugas utama per layar/modal dan status workflow terbaca seketika.
+2. **Trust Through Roles** — tampilkan tindakan hanya kepada role yang berwenang dan jelaskan mengapa aksi terkunci.
+3. **Preventive First** — pemisahan ayam tidak boleh tertunda oleh proses validasi.
+4. **Mobile-First Utility** — target sentuh minimal 44 px, teks terbaca di luar ruang, dan state loading/error/empty/retry jelas.
+5. **Medical Restraint** — disclaimer selalu tersedia; label AI dibedakan dari hasil dokter.
 
-## Accessibility & Inclusion
+## Fixed scope
 
-- Touch target minimum 44px untuk semua tombol
-- Kontras warna memadai untuk outdoor usage
-- Teks yang terbaca di bawah sinar matahari langsung
-- Loading states yang jelas untuk koneksi lambat
+Tidak ada halaman profil, notifikasi push, identitas ayam/kandang, fitur Admin untuk mereset atau mengaktifkan/nonaktifkan akun staf, kewajiban mengganti password sementara, maupun alur reset password mandiri pada halaman login. Admin hanya membuat akun staf memakai nama, email, role, dan password sementara.

@@ -115,13 +115,13 @@ from auth.users
 on conflict (user_id) do nothing;
 
 -- Replace the original authenticated-wide policies. Anonymous users retain
--- read-only access to active workers, and all authenticated roles can read the
--- worker directory. Only administrators can mutate workers or access prediction
--- rows directly from a client.
+-- read-only access to active workers. Only administrators can read or mutate the
+-- full worker directory or access prediction rows directly from a client.
 drop policy if exists "anon_select_active_workers" on public.workers;
 drop policy if exists "authenticated_select_all_workers" on public.workers;
 drop policy if exists "authenticated_insert_workers" on public.workers;
 drop policy if exists "authenticated_update_workers" on public.workers;
+drop policy if exists "admin_select_workers" on public.workers;
 drop policy if exists "admin_insert_workers" on public.workers;
 drop policy if exists "admin_update_workers" on public.workers;
 drop policy if exists "admin_delete_workers" on public.workers;
@@ -131,10 +131,10 @@ create policy "anon_select_active_workers"
   to anon
   using (is_active = true);
 
-create policy "authenticated_select_all_workers"
+create policy "admin_select_workers"
   on public.workers for select
   to authenticated
-  using (true);
+  using ((select auth.jwt() -> 'app_metadata' ->> 'role') = 'admin');
 
 create policy "admin_insert_workers"
   on public.workers for insert
@@ -206,7 +206,11 @@ security definer
 set search_path = pg_catalog, public, private
 as $$
 begin
-  if new.prediction <> 'Healthy' then
+  if new.prediction in (
+    'Coccidiosis',
+    'New Castle Disease',
+    'Salmonellosis'
+  ) then
     insert into public.prediction_followups (prediction_id)
     values (new.id);
   end if;
@@ -227,6 +231,7 @@ as $$
 declare
   ai_prediction text;
   followup_treatment_started_at timestamptz;
+  prediction_deleted_at timestamptz;
   validator_role text;
   workflow_prediction_id uuid;
 begin
@@ -258,6 +263,21 @@ begin
     raise exception using
       errcode = '23514',
       message = 'Validation is only allowed for a non-Healthy prediction with a follow-up';
+  end if;
+
+  -- Keep the deadlock-safe row-lock order: follow-up first, prediction second.
+  -- Re-read deleted_at while holding the prediction lock so a concurrent soft
+  -- delete cannot race with validation creation or editing.
+  select p.deleted_at
+    into prediction_deleted_at
+  from public.predictions p
+  where p.id = workflow_prediction_id
+  for update;
+
+  if not found or prediction_deleted_at is not null then
+    raise exception using
+      errcode = '23514',
+      message = 'Workflow cannot be changed for a soft-deleted prediction';
   end if;
 
   select sp.role
@@ -331,6 +351,8 @@ set search_path = pg_catalog, public, private
 as $$
 declare
   has_definitive_disease_validation boolean;
+  can_reopen_corrected_healthy boolean;
+  prediction_deleted_at timestamptz;
 begin
   -- UPDATE already locks its target tuple; repeat the lock explicitly so this
   -- transition and validation changes visibly serialize on the same row.
@@ -339,6 +361,84 @@ begin
     from public.prediction_followups f
     where f.prediction_id = new.prediction_id
     for update;
+  end if;
+
+  -- UPDATE already owns the follow-up row. Lock the parent prediction only
+  -- afterward, then re-read deleted_at under that lock to serialize with a
+  -- concurrent Admin soft delete.
+  select p.deleted_at
+    into prediction_deleted_at
+  from public.predictions p
+  where p.id = new.prediction_id
+  for update;
+
+  if not found or prediction_deleted_at is not null then
+    raise exception using
+      errcode = '23514',
+      message = 'Workflow cannot be changed for a soft-deleted prediction';
+  end if;
+
+  if tg_op = 'UPDATE' then
+    -- Workflow audit stages are append-only. A recorded timestamp and actor
+    -- cannot be cleared or rewritten by later updates.
+    if old.isolated_at is not null and (
+      new.isolated_at is distinct from old.isolated_at
+      or new.isolated_by is distinct from old.isolated_by
+    ) then
+      raise exception using
+        errcode = '23514',
+        message = 'Recorded isolation audit fields cannot be changed';
+    end if;
+
+    if old.treatment_started_at is not null and (
+      new.treatment_started_at is distinct from old.treatment_started_at
+      or new.treatment_started_by is distinct from old.treatment_started_by
+    ) then
+      raise exception using
+        errcode = '23514',
+        message = 'Recorded treatment start audit fields cannot be changed';
+    end if;
+
+    if old.treatment_completed_at is not null and (
+      new.treatment_completed_at is distinct from old.treatment_completed_at
+      or new.treatment_completed_by is distinct from old.treatment_completed_by
+    ) then
+      raise exception using
+        errcode = '23514',
+        message = 'Recorded treatment completion audit fields cannot be changed';
+    end if;
+
+    if old.closed_at is not null and (
+      new.closed_at is distinct from old.closed_at
+      or new.close_reason is distinct from old.close_reason
+      or new.closed_by is distinct from old.closed_by
+    ) then
+      -- A doctor may edit a pre-treatment Healthy correction. The validation
+      -- sync trigger then reopens that automatically closed case. This exact
+      -- transition is the sole exception to immutable closure audit fields.
+      select exists (
+        select 1
+        from public.prediction_validations v
+        where v.prediction_id = new.prediction_id
+          and not (
+            v.verdict = 'incorrect'
+            and v.corrected_prediction = 'Healthy'
+          )
+      ) into can_reopen_corrected_healthy;
+
+      if not (
+        old.close_reason = 'corrected_healthy'
+        and old.treatment_started_at is null
+        and new.closed_at is null
+        and new.close_reason is null
+        and new.closed_by is null
+        and can_reopen_corrected_healthy
+      ) then
+        raise exception using
+          errcode = '23514',
+          message = 'Recorded closure audit fields cannot be changed';
+      end if;
+    end if;
   end if;
 
   if new.treatment_started_at is not null and new.isolated_at is null then

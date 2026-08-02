@@ -1,95 +1,131 @@
 # Deployment Guide — ChickenShii
 
-Panduan deploy backend & mobile app ke production.
+Panduan ini mencakup backend FastAPI, migration workflow staf, dan build Expo. Jangan menyalin nilai token/key ke dokumentasi, log publik, screenshot, atau source control.
 
----
+## 1. Prasyarat
 
-## 1. Backend (FastAPI + Docker)
+- Project Supabase dan akses untuk menjalankan migration.
+- Environment backend berisi URL Supabase, anon key yang diperlukan, dan service role key.
+- Python 3.11/dependency backend atau Docker.
+- Node.js, dependency mobile, akun Expo/EAS untuk build perangkat.
+- Backup database dan rencana rollback sebelum migration production.
 
-### Prerequisites
-- Docker Desktop terinstall
-- Akun Docker Hub
-- Akun Railway / Render
+## 2. Urutan deployment yang aman
 
-### Build Docker Image
+1. Backup database dan catat jumlah akun Auth/prediksi sebelum migration.
+2. Terapkan skema dasar bila environment baru.
+3. Terapkan `supabase/migrations/20260802090000_add_staff_workflow.sql`.
+4. Verifikasi tabel, trigger, index, RLS, privilege, role existing user, dan `staff_profiles`.
+5. Deploy backend baru dan jalankan smoke test endpoint per role.
+6. Deploy/build mobile yang memakai `/login` bersama dan route guards.
+7. Buat akun uji Dokter/Kepala Pekerja melalui UI Admin, bukan dengan menulis role dari client.
+8. Jalankan matriks regresi sebelum membuka akses pengguna.
+
+Backend harus didahulukan agar aplikasi mobile tidak memanggil endpoint/tabel yang belum tersedia.
+
+## 3. Migration Supabase
+
+File migration:
+
+```text
+supabase/migrations/20260802090000_add_staff_workflow.sql
+```
+
+Migration melakukan hal berikut:
+
+- membuat `staff_profiles`, `prediction_validations`, dan `prediction_followups`;
+- menambahkan trigger follow-up hanya untuk insert prediksi penyakit setelah migration;
+- memasang constraint validasi dan urutan treatment;
+- mencabut akses `anon`/`authenticated` ke tabel workflow dan memberi privilege `service_role`;
+- mengganti policy lama dengan policy Admin pada data sensitif;
+- menambahkan `app_metadata.role=admin` pada seluruh akun Auth yang sudah ada dan membuat profil Admin.
+
+Tidak ada backfill follow-up untuk prediksi lama. Verifikasi ini dengan membandingkan timestamp prediksi lama dan isi `prediction_followups`.
+
+Checklist pascamigration:
+
+- ketiga tabel ada dan RLS aktif;
+- role existing Auth user adalah `admin` tanpa menghapus key app metadata lain;
+- jumlah profil existing sesuai jumlah akun Auth sebelum migration;
+- insert `Healthy` baru tidak membuat follow-up;
+- insert penyakit baru membuat tepat satu follow-up;
+- direct Data API sebagai `anon`/`authenticated` tidak dapat membaca tabel workflow.
+
+## 4. Backend
+
+### Lokal
+
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+python run.py
+```
+
+Isi `.env` secara lokal/deployment secret manager. Jangan gunakan placeholder nyata di commit.
+
+### Docker
+
 ```bash
 cd backend
 docker build -t chikenshii-api .
+docker run --env-file .env -p 8000:8000 chikenshii-api
 ```
 
-### Test Lokal
+Health check tersedia pada `/` dan `/api/v1/health`.
+
+### Smoke test role
+
+Gunakan akun uji terpisah dan token sementara melalui client yang aman. Verifikasi:
+
+- Admin berhasil mengakses statistik/pembuatan staf tetapi ditolak endpoint Doctor/Head Worker.
+- Dokter berhasil membuka pending/history dan ditolak endpoint Admin/Head Worker.
+- Kepala Pekerja berhasil membuka dashboard/follow-ups dan ditolak endpoint Admin/Doctor.
+- Request tanpa token menghasilkan 401; role salah menghasilkan 403.
+
+Jangan menaruh Bearer token pada command yang akan disalin ke laporan.
+
+## 5. Mobile Expo
+
+Buat `mobile/.env` lokal:
+
+```text
+EXPO_PUBLIC_API_URL=https://alamat-backend
+EXPO_PUBLIC_SUPABASE_URL=https://project.supabase.co
+EXPO_PUBLIC_SUPABASE_ANON_KEY=<anon-key>
+```
+
+Service role key tidak boleh menggunakan prefix `EXPO_PUBLIC_` dan tidak boleh berada di mobile.
+
+Verifikasi sebelum build:
+
 ```bash
-docker run -p 8000:8000 \
-  -e SUPABASE_URL=https://xxx.supabase.co \
-  -e SUPABASE_SERVICE_ROLE_KEY=xxx \
-  chikenshii-api
+cd mobile
+npm test -- --runInBand
+npx tsc --noEmit
 ```
 
-Buka `http://localhost:8000` — cek health check.
+Build:
 
-### Push ke Docker Hub
 ```bash
-docker login
-docker tag chikenshii-api <username>/chikenshii-api
-docker push <username>/chikenshii-api
-```
-
-### Deploy ke Railway / Render
-
-**Railway:**
-1. Buka railway.app
-2. New Project → Deploy from Docker Image
-3. Masukkan image: `<username>/chikenshii-api`
-4. Tambah environment variables:
-   ```
-   SUPABASE_URL=https://xxx.supabase.co
-   SUPABASE_SERVICE_ROLE_KEY=xxx
-   SUPABASE_ANON_KEY=xxx
-   ```
-5. Deploy
-
-**Render:**
-1. Buka render.com
-2. New → Web Service
-3. Choose existing image / connect GitHub repo
-4. Isi environment variables (sama seperti Railway)
-5. Deploy
-
-### Update CORS
-Di backend `app/core/config.py`, update `cors_origins` agar menerima request dari mobile app:
-```python
-cors_origins: list[str] = ["*"]  # atau spesifik: ["https://your-app.up.railway.app"]
-```
-
----
-
-## 2. Mobile App (Expo)
-
-### Update API URL
-Buat/update file `.env` di folder `mobile/`:
-```
-EXPO_PUBLIC_API_URL=https://your-app.up.railway.app
-```
-
-Pastikan semua fetch/axios menggunakan `EXPO_PUBLIC_API_URL`.
-
-### Build APK (Production)
-```bash
+eas build --platform android --profile preview
 eas build --platform android --profile production
 ```
 
-### Build APK (Preview / Demo)
-```bash
-eas build --platform android --profile preview
-```
+## 6. Checklist rilis
 
----
+- Shared `/login` mengarahkan tiga role dengan benar; role tidak dikenal logout.
+- Pekerja anonim tetap dapat deteksi dan simpan.
+- Dokter dan Kepala Pekerja masing-masing hanya memiliki dua tab.
+- Admin Pengguna dapat membuat akun; email duplikat ditolak.
+- Data lama/Healthy tidak masuk workflow.
+- Isolasi, tiga verdict, correction, uncertain, treatment gating, auto-close, dan complete berfungsi.
+- Admin tidak melihat/mengekspor validasi atau tindak lanjut.
+- Seluruh test otomatis lulus dan black-box manual memiliki bukti.
+- CORS production dibatasi ke origin yang benar bila deployment membutuhkannya.
 
-## 3. Untuk Demo Sidang
+## 7. Demo sidang
 
-Kalau cuma butuh demo (bukan production beneran):
-
-1. **Backend**: Run lokal pakai `python run.py` — cukup, nggak perlu deploy
-2. **Mobile**: Build preview APK → install ke HP Android
-
-Lebih simpel, nggak perlu Docker / cloud.
+Gunakan dataset demo khusus dan akun uji untuk setiap role. Siapkan urutan: pekerja simpan kasus penyakit → Kepala Pekerja isolate → Dokter validasi → Kepala Pekerja start/complete. Siapkan pula satu kasus uncertain dan satu koreksi Healthy. Jangan memakai akun production atau menampilkan token/key di layar.

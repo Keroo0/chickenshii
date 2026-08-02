@@ -4,6 +4,7 @@ from app.services.ml_service import ml_service
 from app.services import supabase_service
 from app.models.schemas import (
     PredictionResponse,
+    PredictionClass,
     PredictionSaveResponse,
     PredictionSaveData,
     StatsResponse,
@@ -120,7 +121,7 @@ async def predict_image(file: UploadFile = File(...)):
 @router.post("/api/v1/predictions", response_model=PredictionSaveResponse, status_code=status.HTTP_201_CREATED)
 async def save_prediction(
     file: UploadFile = File(...),
-    prediction: str = File(...),
+    prediction: PredictionClass = File(...),
     confidence: float = File(...),
     all_predictions: str = File(...),
     worker_id: str = File(...),

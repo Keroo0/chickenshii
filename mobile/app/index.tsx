@@ -111,7 +111,7 @@ export default function HomeScreen() {
                 <Settings size={16} color={colors.foreground} />
               </Pressable>
             </Link>
-            <Link href="/admin/login" asChild>
+            <Link href="/login" asChild>
               <Pressable className="h-8 w-8 items-center justify-center rounded-full bg-neutral-muted-soft">
                 <LogIn size={16} color={colors.foreground} />
               </Pressable>

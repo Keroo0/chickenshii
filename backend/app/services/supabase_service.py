@@ -320,14 +320,10 @@ def _get_admin_user_by_id(user_id: str) -> Optional[dict]:
         raise UpstreamServiceError("respons rekonsiliasi Auth tidak valid") from exc
 
 
-def _reconcile_auth_user(
-    *, user_id: str, email: str, role: str, duplicate_failure: bool
-) -> dict:
+def _reconcile_auth_user(*, user_id: str, email: str, role: str) -> dict:
     auth_user = _get_admin_user_by_id(user_id)
     if auth_user is not None and _auth_user_matches(auth_user, user_id, email, role):
         return auth_user
-    if duplicate_failure:
-        raise DuplicateEmailError("email sudah terdaftar")
     raise UpstreamServiceError("hasil pembuatan akun tidak dapat direkonsiliasi")
 
 
@@ -476,23 +472,16 @@ def create_staff_account(
             user_id=user_id,
             email=normalized_email,
             role=role,
-            duplicate_failure=False,
         )
     else:
         duplicate_failure = _is_duplicate_email_response(auth_response)
         if duplicate_failure:
-            auth_user = _reconcile_auth_user(
-                user_id=user_id,
-                email=normalized_email,
-                role=role,
-                duplicate_failure=True,
-            )
+            raise DuplicateEmailError("email sudah terdaftar")
         elif 500 <= auth_response.status_code:
             auth_user = _reconcile_auth_user(
                 user_id=user_id,
                 email=normalized_email,
                 role=role,
-                duplicate_failure=False,
             )
         elif auth_response.status_code < 200 or auth_response.status_code >= 300:
             raise UpstreamServiceError("layanan pembuatan akun gagal")
@@ -504,7 +493,6 @@ def create_staff_account(
                     user_id=user_id,
                     email=normalized_email,
                     role=role,
-                    duplicate_failure=False,
                 )
             else:
                 if not _auth_user_matches(
@@ -514,7 +502,6 @@ def create_staff_account(
                         user_id=user_id,
                         email=normalized_email,
                         role=role,
-                        duplicate_failure=False,
                     )
 
     profile = _ensure_staff_profile(

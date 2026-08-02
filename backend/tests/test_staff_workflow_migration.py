@@ -31,7 +31,15 @@ def test_migration_has_triggered_workflow_invariants():
     sql = migration_sql()
 
     assert "after insert on public.predictions" in sql
-    assert "new.prediction <> 'healthy'" in sql
+    followup_function = sql.split(
+        "create or replace function private.create_prediction_followup()", 1
+    )[1].split("create trigger predictions_create_followup", 1)[0]
+    assert all(
+        disease in followup_function
+        for disease in ("coccidiosis", "new castle disease", "salmonellosis")
+    )
+    assert "unknown disease" not in followup_function
+    assert "new.prediction <> 'healthy'" not in followup_function
     assert "veterinarian_id" in sql
     assert (
         "role <> 'veterinarian'" in sql
@@ -65,6 +73,51 @@ def test_followup_closure_is_atomic_and_owned_by_correcting_veterinarian():
         r"set\s+closed_at\s*=\s*null,\s*close_reason\s*=\s*null,\s*closed_by\s*=\s*null",
         sql,
     )
+
+
+def test_followup_audit_stages_are_immutable_after_being_recorded():
+    sql = migration_sql()
+    followup_function = sql.split(
+        "create or replace function private.validate_prediction_followup_ordering()", 1
+    )[1].split("create trigger prediction_followups_enforce_ordering", 1)[0]
+
+    immutable_pairs = (
+        ("isolated_at", "isolated_by"),
+        ("treatment_started_at", "treatment_started_by"),
+        ("treatment_completed_at", "treatment_completed_by"),
+    )
+    for timestamp, actor in immutable_pairs:
+        assert f"old.{timestamp} is not null" in followup_function
+        assert f"new.{timestamp} is distinct from old.{timestamp}" in followup_function
+        assert f"new.{actor} is distinct from old.{actor}" in followup_function
+
+    assert "old.closed_at is not null" in followup_function
+    for field in ("closed_at", "close_reason", "closed_by"):
+        assert f"new.{field} is distinct from old.{field}" in followup_function
+    assert "recorded closure audit fields cannot be changed" in followup_function
+
+    # The guards compare only audit columns, so an unrelated-field update keeps
+    # passing as long as every previously recorded audit value remains identical.
+    assert "new.updated_at is distinct from old.updated_at" not in followup_function
+
+
+def test_corrected_healthy_closure_can_only_reopen_for_a_changed_validation():
+    sql = migration_sql()
+    followup_function = sql.split(
+        "create or replace function private.validate_prediction_followup_ordering()", 1
+    )[1].split("create trigger prediction_followups_enforce_ordering", 1)[0]
+
+    assert "old.close_reason = 'corrected_healthy'" in followup_function
+    assert "old.treatment_started_at is null" in followup_function
+    assert all(
+        f"new.{field} is null" in followup_function
+        for field in ("closed_at", "close_reason", "closed_by")
+    )
+    assert "from public.prediction_validations" in followup_function
+    assert "v.prediction_id = new.prediction_id" in followup_function
+    assert "v.verdict = 'incorrect'" in followup_function
+    assert "v.corrected_prediction = 'healthy'" in followup_function
+    assert "can_reopen_corrected_healthy" in followup_function
 
 
 def test_validation_identity_is_immutable_and_delete_is_forbidden():
@@ -102,6 +155,30 @@ def test_validation_and_treatment_transitions_share_followup_row_lock():
     assert "for update" in followup_function
 
 
+def test_workflow_transitions_lock_then_reject_soft_deleted_predictions():
+    sql = migration_sql()
+    validation_function = sql.split(
+        "create or replace function private.validate_prediction_validation()", 1
+    )[1].split("create trigger prediction_validations_enforce_workflow", 1)[0]
+    followup_function = sql.split(
+        "create or replace function private.validate_prediction_followup_ordering()", 1
+    )[1].split("create trigger prediction_followups_enforce_ordering", 1)[0]
+
+    for function_sql in (validation_function, followup_function):
+        assert "select p.deleted_at" in function_sql
+        assert "from public.predictions p" in function_sql
+        assert "for update" in function_sql
+        assert "prediction_deleted_at is not null" in function_sql
+        assert "soft-deleted prediction" in function_sql
+
+    assert validation_function.index("for update of f") < validation_function.index(
+        "select p.deleted_at"
+    )
+    assert followup_function.index("from public.prediction_followups f") < (
+        followup_function.index("select p.deleted_at")
+    )
+
+
 def test_migration_does_not_backfill_followups():
     sql = migration_sql()
 
@@ -127,7 +204,14 @@ def test_migration_locks_down_new_tables_and_replaces_broad_policies():
         )
 
     assert "anon_select_active_workers" in sql
-    assert "authenticated_select_all_workers" in sql
+    assert 'create policy "authenticated_select_all_workers"' not in sql
+    assert re.search(
+        r'create\s+policy\s+"admin_select_workers"(?:(?!;).)*for\s+select'
+        r'(?:(?!;).)*to\s+authenticated(?:(?!;).)*app_metadata'
+        r"(?:(?!;).)*role'\)\s*=\s*'admin'",
+        sql,
+        re.DOTALL,
+    )
     assert "app_metadata" in sql
     assert "role' = 'admin'" in sql or "role') = 'admin'" in sql
     assert "drop policy if exists \"authenticated_insert_workers\"" in sql

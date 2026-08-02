@@ -1,115 +1,128 @@
-Software Requirements Specification (SRS)
+# Software Requirements Specification (SRS)
 
-Sistem Deteksi Dini Penyakit Ayam Petelur Berbasis Citra Feses (ChickenShii)
+## 1. Ruang lingkup
 
-1. Validasi Input & Keamanan (Two-Layer Validation)
+Sistem menerima citra feses ayam, menjalankan klasifikasi MobileNetV2, menampilkan rekomendasi statis, menyimpan hasil yang dipilih pengguna, lalu mengelola validasi dan tindak lanjut untuk prediksi penyakit baru. Sistem mempunyai empat aktor: Pekerja Kandang anonim, Admin, Dokter Hewan, dan Kepala Pekerja.
 
-Sistem mewajibkan validasi ketat di sisi Client (React Native) dan Server (FastAPI) untuk mencegah crash dan payload berbahaya.
+## 2. Kebutuhan fungsional
 
-1.1. Validasi Frontend (React Native / Expo)
+### FR-01 — Input dan inferensi
 
-Sumber Gambar: Diambil melalui expo-image-picker, baik dari kamera (launchCameraAsync) maupun galeri (launchImageLibraryAsync), dengan opsi allowsEditing: true agar native crop tool otomatis terbuka setelah gambar dipilih.
+- Client menerima JPG/JPEG/PNG maksimal 5 MB dari kamera/galeri dan menggunakan native crop.
+- Backend memvalidasi ulang MIME, isi, ukuran, dan file kosong.
+- Backend melakukan resize/normalisasi 224×224 dan mengembalikan kelas, confidence, threshold, probabilitas, rekomendasi, dan disclaimer.
+- Confidence di bawah `confidence_threshold` memunculkan peringatan tetapi tidak memblokir simpan.
 
-Crop Wajib: Sistem tidak boleh melanjutkan ke tahap deteksi apabila proses crop dibatalkan oleh pengguna (asset kosong/null) — pengguna wajib menyelesaikan atau membatalkan crop untuk kembali memilih ulang.
+### FR-02 — Penyimpanan prediksi pekerja
 
-Tipe File: Hanya menerima MIME type image/jpeg, image/png, dan image/jpg — dibaca dari properti mimeType/type pada asset hasil crop.
+- Pekerja memilih `worker_id` dari daftar pekerja aktif, bukan mengetik nama bebas.
+- `POST /api/v1/predictions` memvalidasi pekerja, mengunggah foto, dan membuat satu baris baru.
+- Kegagalan simpan mempertahankan foto/hasil di state dan memberi aksi retry.
+- Endpoint simpan hanya menerima empat kelas model dan menolak label lain dengan `422`. Insert `Coccidiosis`, `New Castle Disease`, atau `Salmonellosis` otomatis membuat satu `prediction_followups`; insert `Healthy` tidak membuat follow-up.
 
-Ukuran File: Maksimal 5 MB (5.242.880 bytes) — dicek dari properti fileSize pada asset; jika tidak tersedia, fallback ke pengecekan ukuran file via expo-file-system sebelum upload.
+### FR-03 — Login dan route role
 
-Behavior: Jika file tidak memenuhi syarat, sistem wajib memblokir upload dan menampilkan pesan error (Alert/Toast native) seketika sebelum melakukan request ke backend.
+- Admin, Dokter Hewan, dan Kepala Pekerja memakai `/login` yang sama.
+- Role dibaca hanya dari `app_metadata.role` dengan nilai `admin`, `veterinarian`, atau `head_worker`.
+- Redirect: `/admin`, `/doctor`, atau `/head-worker`.
+- Role tidak ada/tidak dikenal menyebabkan logout dan penolakan akses.
+- Setiap request API staf membawa `Authorization: Bearer <JWT>`; backend memverifikasi token dan exact role.
+- Pekerja Kandang tetap anonim dan tidak mendapat route staf.
 
-1.2. Validasi Backend (FastAPI)
+### FR-04 — Admin
 
-Tipe File: Harus memeriksa content-type dari header dan/atau menggunakan magic numbers untuk memastikan file benar-benar gambar, bukan sekadar ekstensi palsu.
+- Admin dapat membuka statistik, riwayat prediksi, filter/search, soft delete, dan export CSV prediksi.
+- Tab `Pengguna` memuat pengelolaan `workers` serta form akun staf.
+- `POST /api/v1/staff-accounts` menerima nama, email, password sementara minimal delapan karakter, dan role `veterinarian`/`head_worker`.
+- Email duplikat menghasilkan konflik. Admin tidak mendapat fungsi reset atau aktivasi/nonaktivasi akun, tidak ada forced password change, dan halaman login tidak menyediakan alur reset password mandiri.
+- Admin tidak dapat membaca data validasi/tindak lanjut melalui UI maupun export CSV.
 
-Ukuran File: Menolak (reject) request jika ukuran UploadFile melebihi 5 MB. Server mengembalikan HTTP Status 413 Payload Too Large.
+### FR-05 — Dokter Hewan
 
-Validasi Respons: Semua struktur respons dari API harus divalidasi menggunakan skema Pydantic (V2) sebelum dikirimkan ke client.
+- `/doctor` mempunyai tepat dua tab: `Validasi` dan `Riwayat`.
+- Antrean Validasi hanya memuat prediksi penyakit baru yang belum memiliki validasi.
+- Dokter dapat memilih `matching`, `incorrect`, atau `uncertain`.
+- `incorrect` wajib menyertakan `corrected_prediction` dari empat kelas dan harus berbeda dari label AI; verdict lain melarang field koreksi.
+- `note` opsional, maksimal 5.000 karakter.
+- Satu prediksi hanya dapat memiliki satu validasi; request pertama menang, kompetitor menerima konflik.
+- Riwayat difilter oleh `veterinarian_id` token.
+- Hanya dokter pembuat dapat mengedit validasi dan hanya selama penanganan belum dimulai. Validasi tidak dapat dihapus.
 
-1.3. Validasi Simpan Hasil (POST /api/v1/predictions)
+### FR-06 — Kepala Pekerja
 
-Pekerja Kandang Terpilih: Field worker_id wajib diisi dengan nilai hasil pilihan dari dropdown (SaveWorkerModal.tsx) — bukan input teks bebas. Tombol konfirmasi pada modal wajib disabled selama belum ada pekerja yang dipilih.
+- `/head-worker` mempunyai tepat dua tab: `Dashboard` dan `Tindak Lanjut`.
+- Dashboard menampilkan jumlah kasus penyakit hari ini, belum dipisahkan, menunggu validasi, dan penanganan aktif, plus kasus terbaru.
+- Kepala Pekerja dapat menandai pemisahan kapan saja setelah follow-up dibuat.
+- Mulai penanganan mensyaratkan `isolated_at` dan validasi definitif penyakit (`matching`, atau `incorrect` dengan koreksi bukan `Healthy`).
+- `uncertain` memunculkan status `requires_examination` dan memblokir mulai penanganan.
+- Selesai penanganan mensyaratkan penanganan sudah dimulai.
+- Setiap aksi mencatat timestamp dan aktor dari token, bukan input client.
 
-Validasi Server: Backend memvalidasi worker_id benar-benar terdaftar di tabel workers dan berstatus is_active = true sebelum insert dijalankan. 400 Bad Request dikembalikan jika worker_id kosong, tidak ditemukan, atau merujuk ke pekerja yang sudah dinonaktifkan — mengantisipasi kondisi race saat Admin menonaktifkan pekerja di waktu yang hampir bersamaan dengan proses Simpan.
+### FR-07 — Label efektif dan rekomendasi
 
-Idempotensi: Setiap penekanan tombol Simpan menghasilkan satu baris baru di tabel predictions; sistem tidak melakukan update terhadap entri yang sudah tersimpan sebelumnya.
+- Tanpa koreksi, label efektif adalah label AI.
+- Dengan `incorrect`, label efektif adalah `corrected_prediction`.
+- Rekomendasi mengikuti label efektif dan tetap tampil pada detail kasus.
+- Koreksi ke `Healthy` mengisi penutupan otomatis dengan alasan `corrected_healthy`.
 
-1.4. Validasi Kegagalan Simpan & Percobaan Ulang
+## 3. Status workflow
 
-Jika POST /api/v1/predictions gagal (kegagalan jaringan, timeout, atau respons error dari server), aplikasi wajib mempertahankan state gambar hasil crop dan hasil prediksi yang sudah ada di memori — tidak mengembalikan pengguna ke layar upload maupun meminta ulang proses Deteksi.
+API dapat mengembalikan status berikut:
 
-Aplikasi menampilkan RetrySaveBanner.tsx berisi pesan kegagalan dan tombol "Coba Lagi" yang mengulang pemanggilan POST /predictions dengan payload (gambar, hasil prediksi, worker_id) yang sama persis seperti percobaan sebelumnya.
+| Status | Makna |
+|---|---|
+| `pending_isolation` | Belum ditandai dipisahkan. |
+| `pending_validation` | Sudah dipisahkan tetapi hasil dokter belum tersedia. |
+| `requires_examination` | Dokter tidak dapat memastikan; penanganan terkunci. |
+| `ready_for_treatment` | Sudah dipisahkan dan penyakit dipastikan. |
+| `active_treatment` | Penanganan sedang berjalan. |
+| `treatment_completed` | Penanganan selesai. |
+| `auto_closed` | Dokter mengoreksi menjadi Healthy. |
 
-Apabila aplikasi ditutup/dibackground sebelum Simpan berhasil, state hasil yang belum tersimpan boleh hilang (tidak wajib dipertahankan lintas sesi aplikasi) — pengguna perlu mengulang dari proses Deteksi. Ini merupakan batasan yang disengaja untuk menjaga kesederhanaan implementasi pada P0/P1.
+## 4. Validasi dan error handling
 
-1.5. Validasi Manajemen Pekerja Kandang (Admin)
+- `401` untuk token tidak ada/tidak valid.
+- `403` untuk role tidak sesuai.
+- `404` jika kasus/validasi tidak ditemukan dalam scope pengguna.
+- `409` untuk kompetisi validasi atau transisi state yang bertabrakan.
+- `413` untuk file melebihi 5 MB.
+- `422` untuk format, verdict, koreksi, tanggal, atau transisi semantik yang tidak valid.
+- `502/503` untuk kegagalan provisioning/upstream Supabase sesuai endpoint.
+- UI wajib menyediakan loading, empty state, error, retry, refresh, dan modal yang dapat ditutup aman.
 
-Nama Pekerja: Field name pada tabel workers wajib diisi, tidak boleh kosong/hanya spasi, dan divalidasi baik di WorkerListManager.tsx maupun lewat constraint Not Null di database.
+## 5. Keamanan dan integritas data
 
-Duplikasi Nama: Sistem tidak menegakkan keunikan nama secara ketat di level database (dua pekerja bisa kebetulan bernama sama), namun UI wajib menampilkan peringatan non-blocking apabila Admin menambahkan nama yang sudah ada di daftar aktif, untuk mengurangi risiko duplikasi tidak disengaja.
+### 5.1 Auth dan role
 
-Nonaktifkan, Bukan Hapus: Admin hanya bisa mengubah is_active menjadi false, tidak tersedia opsi hapus permanen baris workers dari UI — mencegah hilangnya referensi pada riwayat prediksi yang sudah ada (FK worker_id akan menjadi tidak valid jika baris induknya dihapus).
+- Token sesi staf disimpan melalui mekanisme aman perangkat.
+- Role keamanan hanya bersumber dari `app_metadata`; `user_metadata` tidak dipercaya.
+- Existing Auth users diberi role `admin` saat migration dan dibuatkan `staff_profiles`.
 
-1.6. Validasi Pencarian, Filter, dan Hapus Riwayat (Admin)
+### 5.2 RLS dan akses Data API
 
-Pencarian & Filter: Query pada HistorySearchFilterBar.tsx (nama pekerja, kelas penyakit, rentang tanggal) wajib selalu disertai kondisi deleted_at IS NULL, agar entri yang sudah di-soft-delete tidak pernah muncul kembali lewat pencarian.
+- `staff_profiles`, `prediction_validations`, dan `prediction_followups` mengaktifkan RLS.
+- Seluruh privilege `anon`/`authenticated` pada ketiga tabel dicabut; `service_role` diberi privilege eksplisit.
+- Backend adalah satu-satunya jalur baca/tulis workflow.
+- Policy `workers` mempertahankan baca pekerja aktif untuk anonim dan membatasi mutasi pada Admin.
+- Policy `predictions` membatasi akses client terautentikasi pada Admin; penyimpanan pekerja tetap melalui backend.
 
-Hapus (Soft Delete): Aksi hapus pada HistoryListItem.tsx wajib menampilkan dialog konfirmasi sebelum mengeksekusi UPDATE predictions SET deleted_at = now(). Tidak tersedia mekanisme hard delete dari UI aplikasi.
+### 5.3 Constraint dan trigger
 
-1.7. Validasi Statistik Dashboard (GET /api/v1/stats)
+- Unique `prediction_validations.prediction_id` menegakkan satu validator.
+- Constraint pasangan waktu/aktor mencegah audit trail setengah terisi.
+- Trigger melarang validasi data non-workflow, label koreksi yang sama, delete validasi, dan edit setelah penanganan dimulai.
+- Trigger follow-up menegakkan urutan isolasi → mulai → selesai dan validasi definitif sebelum mulai.
+- Trigger sinkronisasi menutup kasus yang dikoreksi Healthy.
 
-Autentikasi: Endpoint ini wajib disertai token sesi Admin yang valid (Authorization: Bearer <jwt>). 401 Unauthorized dikembalikan jika token tidak ada, tidak valid, atau kedaluwarsa.
+## 6. Kebutuhan nonfungsional
 
-Parameter period: Wajib salah satu dari week, month, atau year. 400 Bad Request jika diisi nilai lain.
+- Target inferensi hangat 1–3 detik; UI tetap menangani cold start lebih lama.
+- Limit daftar workflow 1–100 item dengan default 50 dan offset untuk pagination.
+- Filter tanggal memakai `date_from`/`date_to`; rentang terbalik ditolak.
+- Dashboard Kepala Pekerja memakai tanggal Asia/Jakarta.
+- Semua response workflow mengikuti envelope `{ "status": "success", "data": ... }`.
+- Aplikasi harus tetap mudah digunakan satu tangan dan memiliki target sentuh minimal 44 px.
 
-Parameter reference_date: Opsional, format YYYY-MM-DD. Jika tidak diisi, backend menggunakan tanggal hari ini sebagai acuan. 400 Bad Request jika format tidak valid.
+## 7. Batasan ruang lingkup
 
-Perhitungan Rentang: Backend yang bertanggung jawab menentukan rentang tanggal (start/end) sesuai period dan reference_date — bukan frontend — agar konsisten dengan zona waktu server dan definisi awal minggu/bulan/tahun.
-
-2. Behavior Sistem & Error Handling
-
-2.1. Manajemen State Loading & Latensi
-
-Cold Start Awareness: Karena backend menggunakan layanan cloud tier gratis (Railway/Render), cold start dapat memakan waktu hingga ~30 detik. Aplikasi wajib memiliki state loading interaktif (Modal/overlay dengan ActivityIndicator) yang mengunci tombol submit (disabled state) agar pengguna tidak melakukan spam tap.
-
-Warm Inference: Setelah server aktif, proses prediksi (inference) ditargetkan selesai dalam 1-3 detik.
-
-2.2. Standarisasi Error Handling
-
-422 Unprocessable Entity: Dikembalikan jika file rusak, tidak terbaca oleh Pillow/OpenCV, atau format salah.
-
-413 Payload Too Large: Dikembalikan jika file melebihi batas 5MB di sisi server.
-
-500 Internal Server Error: Dikembalikan jika terjadi kegagalan saat load model Keras atau saat proses inferensi. Aplikasi harus menangkap pesan ini dengan anggun ("Terjadi kesalahan pada server, coba beberapa saat lagi") tanpa mengekspos stack trace ke pengguna.
-
-Konektivitas: Karena aplikasi berjalan di perangkat mobile, aplikasi wajib menangani kondisi tanpa koneksi internet/timeout secara eksplisit (pesan berbeda dari error server) sebelum request sempat dikirim.
-
-2.3. Peringatan Confidence Rendah
-
-Ambang Batas: Backend mengembalikan nilai confidence_threshold (default 60.0) pada respons POST /predict. Aplikasi wajib membandingkan confidence utama terhadap nilai ini — bukan meng-hardcode angka ambang batas di kode client — agar nilai bisa disesuaikan dari sisi backend tanpa rilis ulang aplikasi.
-
-Tampilan: Apabila confidence < confidence_threshold, LowConfidenceWarning.tsx wajib tampil di antara ConfidenceBarChart.tsx dan DiseaseInfoCard.tsx, berisi anjuran mengambil ulang foto dengan pencahayaan/framing yang lebih baik. Peringatan ini tidak menghalangi pengguna untuk tetap melanjutkan (melihat rekomendasi maupun menyimpan hasil) apabila mereka memilih demikian.
-
-3. Aturan Aplikasi & Konstrain Bisnis
-
-3.1. Preprocessing Gambar
-
-Tanggung Jawab: Proses normalisasi dan resize gambar ke resolusi 224x224x3 piksel harus dilakukan di Service Layer pada backend (menggunakan Pillow/NumPy), bukan di dalam arsitektur model AI (Lambda layer), dan bukan di sisi client.
-
-Alasan: Memisahkan preprocessing dari grafis komputasi model memastikan portabilitas file .keras dan menghindari isu deserialize function saat deployment. Melakukan preprocessing di backend juga memastikan hasil konsisten terlepas dari perangkat mobile yang dipakai.
-
-3.2. Knowledge Base Statis
-
-Informasi penyakit — mencakup deskripsi, penyebab (cause), dan rekomendasi penanganan awal — diikat langsung di dalam kode (diseaseInfo.ts di React Native atau recommendations.py di FastAPI). Ketiga jenis informasi ini masing-masing dirender sebagai card terpisah di Layar Hasil.
-
-Larangan: Sistem dilarang keras melakukan panggilan API ke Large Language Models (LLM) eksternal untuk melakukan inferensi teks guna mencegah misinformasi medis dan menghindari beban biaya/latensi.
-
-3.3. Penegakan Disclaimer Medis
-
-UI/UX wajib mengunci teks disclaimer ("Hasil ini adalah dugaan awal dari sistem AI. Segera konsultasikan dengan dokter hewan...") pada DisclaimerBanner.tsx, diletakkan setelah Card Rekomendasi Penanganan Awal dan sebelum tombol Reset/Simpan, selalu terlihat (fully rendered), tidak boleh disembunyikan di dalam accordion/collapsible section yang tertutup secara default, dan tidak boleh hilang saat scroll tanpa disengaja.
-
-3.4. Penyimpanan Sesi Autentikasi (Mobile-specific)
-
-Token sesi/JWT hasil login Admin dari Supabase Auth wajib disimpan menggunakan expo-secure-store, yang memanfaatkan Keychain di iOS dan Keystore di Android. Ini memastikan token tersimpan terenkripsi di level OS, bukan sebagai plain text.
-
-Session harus divalidasi ulang (cek expiry) setiap kali screen admin/*.tsx dibuka, dan sistem wajib melakukan redirect otomatis ke login.tsx apabila sesi tidak valid atau sudah kedaluwarsa.
+Tidak tersedia halaman profil, notifikasi push, identitas ayam, identitas kandang, validasi untuk kelas Healthy, backfill prediksi lama, akses workflow Admin, atau evaluasi akurasi semua kelas berdasarkan validasi dokter.

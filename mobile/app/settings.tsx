@@ -103,8 +103,9 @@ export default function SettingsScreen() {
           </View>
 
           <Text className="text-xs font-outfit_medium text-neutral-muted leading-relaxed">
-            Masukkan URL server backend. Jika server utama mati, ganti dengan
-            URL cadangan tanpa perlu rebuild aplikasi.
+            URL khusus hanya digunakan untuk deteksi dan penyimpanan pekerja
+            tanpa login. Token akun staf hanya dikirim ke server default yang
+            ditetapkan saat aplikasi dibangun.
           </Text>
 
           <TextInput
