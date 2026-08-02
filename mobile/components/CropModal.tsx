@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Modal, View, TouchableOpacity, Text, Dimensions } from 'react-native'
+import { useState, useEffect } from 'react'
+import { Modal, View, TouchableOpacity, Text, Dimensions, Image } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import Animated, {
   useSharedValue,
@@ -22,10 +22,25 @@ const CROP_SIZE = Math.min(SCREEN.width - 48, SCREEN.height * 0.55)
 
 export default function CropModal({ visible, uri, onConfirm, onCancel }: Props) {
   const [rotation, setRotation] = useState(0)
+  const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null)
   const translateX = useSharedValue(0)
   const translateY = useSharedValue(0)
   const baseX = useSharedValue(0)
   const baseY = useSharedValue(0)
+
+  useEffect(() => {
+    if (visible && uri) {
+      Image.getSize(
+        uri,
+        (width, height) => {
+          setImageSize({ width, height })
+        },
+        (error) => {
+          console.error('Failed to get image size:', error)
+        }
+      )
+    }
+  }, [uri, visible])
 
   const pan = Gesture.Pan()
     .onBegin(() => {
@@ -50,16 +65,38 @@ export default function CropModal({ visible, uri, onConfirm, onCancel }: Props) 
   }
 
   const handleConfirm = async () => {
+    if (!imageSize) return
+
+    const { width: W, height: H } = imageSize
+    const isRotated90 = rotation % 180 === 90
+    const W_rot = isRotated90 ? H : W
+    const H_rot = isRotated90 ? W : H
+
+    const D_orig = Math.min(W_rot, H_rot)
+    const originX_base = W_rot > H_rot ? (W_rot - H_rot) / 2 : 0
+    const originY_base = H_rot > W_rot ? (H_rot - W_rot) / 2 : 0
+
+    const crop_x_offset = (0.25 - translateX.value / CROP_SIZE) * D_orig / 1.5
+    const crop_y_offset = (0.25 - translateY.value / CROP_SIZE) * D_orig / 1.5
+    const crop_size_orig = D_orig / 1.5
+
+    const originX = Math.max(0, Math.round(originX_base + crop_x_offset))
+    const originY = Math.max(0, Math.round(originY_base + crop_y_offset))
+    const cropSize = Math.round(crop_size_orig)
+
+    const finalOriginX = Math.min(originX, W_rot - cropSize)
+    const finalOriginY = Math.min(originY, H_rot - cropSize)
+
     const result = await ImageManipulator.manipulateAsync(
       uri,
       [
         { rotate: rotation },
         {
           crop: {
-            originX: 0,
-            originY: 0,
-            width: 1024,
-            height: 1024,
+            originX: finalOriginX,
+            originY: finalOriginY,
+            width: cropSize,
+            height: cropSize,
           },
         },
       ],

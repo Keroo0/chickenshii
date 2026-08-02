@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.api.routes import router
+from app.api.workflow_routes import router as workflow_router
 from app.services.ml_service import ml_service
 
 app = FastAPI(title="ChickenShii API", version="1.0.0")
@@ -16,6 +17,7 @@ app.add_middleware(
 )
 
 app.include_router(router)
+app.include_router(workflow_router)
 
 
 @app.get("/")

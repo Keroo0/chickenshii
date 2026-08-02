@@ -1,5 +1,8 @@
-from pydantic import BaseModel, Field
-from typing import Dict, Optional
+from datetime import datetime
+from uuid import UUID
+
+from pydantic import BaseModel, Field, field_validator
+from typing import Dict, Literal, Optional
 
 
 class RecommendationData(BaseModel):
@@ -47,3 +50,35 @@ class StatsData(BaseModel):
 class StatsResponse(BaseModel):
     status: str = "success"
     data: StatsData
+
+
+class StaffAccountCreateRequest(BaseModel):
+    full_name: str = Field(..., min_length=1, max_length=200)
+    email: str = Field(..., min_length=3, max_length=320)
+    password: str = Field(..., min_length=8)
+    role: Literal["veterinarian", "head_worker"]
+
+    @field_validator("full_name")
+    @classmethod
+    def validate_full_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("full_name tidak boleh kosong")
+        return normalized
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        local, separator, domain = normalized.partition("@")
+        if not separator or not local or "." not in domain or domain.startswith("."):
+            raise ValueError("email tidak valid")
+        return normalized
+
+
+class StaffAccountResponse(BaseModel):
+    id: UUID
+    full_name: str
+    email: str
+    role: Literal["veterinarian", "head_worker"]
+    created_at: datetime

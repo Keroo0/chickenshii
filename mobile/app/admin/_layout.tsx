@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { View, Text, ActivityIndicator, Image } from "react-native";
 import { Redirect, Stack, useSegments } from "expo-router";
-import { supabase } from "../../services/supabase";
+import { supabase as supabaseClient } from "../../services/supabase";
 import { colors } from "../../constants/colors";
 
 export default function AdminLayout() {
@@ -9,7 +9,11 @@ export default function AdminLayout() {
   const [session, setSession] = useState<boolean | null>(null);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    if (!supabaseClient) {
+      setSession(false);
+      return;
+    }
+    supabaseClient.auth.getSession().then(({ data: { session } }) => {
       setSession(!!session);
     });
   }, []);

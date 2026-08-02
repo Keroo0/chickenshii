@@ -10,15 +10,52 @@ from app.models.schemas import (
     StatsData,
     StatsRange,
     RecommendationData,
+    StaffAccountCreateRequest,
+    StaffAccountResponse,
 )
 from app.utils.knowledge_base import KNOWLEDGE_BASE
 from app.core.config import settings
+import httpx
 import json
 
 router = APIRouter()
 
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
 ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/jpg"]
+
+
+def _get_bearer_token(authorization: Optional[str]) -> str:
+    parts = authorization.split() if authorization else []
+    if len(parts) != 2 or parts[0].casefold() != "bearer":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Token tidak diberikan"
+        )
+    token = parts[1]
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Token tidak diberikan"
+        )
+    return token
+
+
+def _require_role(authorization: Optional[str], role: str) -> dict:
+    token = _get_bearer_token(authorization)
+    try:
+        return supabase_service.require_role(token, role)
+    except supabase_service.AuthenticationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Token tidak valid"
+        ) from exc
+    except supabase_service.AuthorizationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Pengguna tidak memiliki akses",
+        ) from exc
+    except supabase_service.UpstreamServiceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Layanan autentikasi tidak tersedia",
+        ) from exc
 
 @router.get("/api/v1/health")
 def health():
@@ -133,7 +170,7 @@ async def save_prediction(
 
 
 @router.get("/api/v1/stats", response_model=StatsResponse)
-async def get_stats(
+def get_stats(
     period: str = Query(..., description="week, month, atau year"),
     reference_date: Optional[str] = Query(None, description="YYYY-MM-DD"),
     authorization: Optional[str] = Header(None),
@@ -141,14 +178,7 @@ async def get_stats(
     if period not in ("week", "month", "year"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="period harus salah satu dari: week, month, year")
 
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token tidak diberikan")
-
-    token = authorization.split(" ", 1)[1]
-    try:
-        supabase_service.verify_admin_token(token)
-    except ValueError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token tidak valid")
+    _require_role(authorization, "admin")
 
     try:
         stats = supabase_service.get_stats(period, reference_date)
@@ -163,3 +193,49 @@ async def get_stats(
             by_class=stats["by_class"],
         )
     )
+
+
+@router.post(
+    "/api/v1/staff-accounts",
+    response_model=StaffAccountResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_staff_account(
+    request: StaffAccountCreateRequest,
+    authorization: Optional[str] = Header(None),
+):
+    _require_role(authorization, "admin")
+
+    try:
+        created = supabase_service.create_staff_account(
+            full_name=request.full_name,
+            email=request.email,
+            password=request.password,
+            role=request.role,
+        )
+    except supabase_service.DuplicateEmailError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Email sudah terdaftar"
+        ) from exc
+    except supabase_service.StaffProfileConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Akun staf sudah ada dengan profil berbeda",
+        ) from exc
+    except supabase_service.StaffProvisioningError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Gagal membuat akun staf",
+        ) from exc
+    except supabase_service.UpstreamServiceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Layanan Supabase tidak tersedia",
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Gagal membuat akun staf",
+        ) from exc
+
+    return StaffAccountResponse(**created)

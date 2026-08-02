@@ -2,7 +2,7 @@ import { useState } from "react";
 import { View, Text, TextInput, TouchableOpacity, Image, KeyboardAvoidingView, Platform, ScrollView } from "react-native";
 import { useRouter } from "expo-router";
 import { ArrowLeft, Eye, EyeOff, CheckCircle, XCircle } from "lucide-react-native";
-import { supabase } from "../../services/supabase";
+import { supabase as supabaseClient } from "../../services/supabase";
 import { colors } from "../../constants/colors";
 import DecorativeBackground from "../../components/DecorativeBackground";
 
@@ -25,8 +25,12 @@ export default function AdminLoginScreen() {
       return;
     }
 
+    if (!supabaseClient) {
+      setError("Koneksi database tidak tersedia");
+      return;
+    }
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
     setLoading(false);
 
     if (error) {
@@ -53,8 +57,12 @@ export default function AdminLoginScreen() {
       return;
     }
 
+    if (!supabaseClient) {
+      setError("Koneksi database tidak tersedia");
+      return;
+    }
     setLoading(true);
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
       redirectTo: "chikenshii://admin/login",
     });
     setLoading(false);

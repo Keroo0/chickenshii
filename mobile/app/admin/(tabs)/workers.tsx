@@ -12,7 +12,7 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { LogOut } from "lucide-react-native";
-import { supabase } from "../../../services/supabase";
+import { supabase as supabaseClient } from "../../../services/supabase";
 import { colors } from "../../../constants/colors";
 import DecorativeBackground from "../../../components/DecorativeBackground";
 import { Worker } from "../../../types";
@@ -27,8 +27,9 @@ export default function WorkersScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const fetchWorkers = useCallback(async () => {
+    if (!supabaseClient) return;
     try {
-      const { data } = await supabase
+      const { data } = await supabaseClient
         .from("workers")
         .select("id, name, is_active")
         .order("name");
@@ -53,7 +54,8 @@ export default function WorkersScreen() {
     if (!name) return;
     setAdding(true);
     setError(null);
-    const { error } = await supabase.from("workers").insert({ name });
+    if (!supabaseClient) return;
+    const { error } = await supabaseClient.from("workers").insert({ name });
     setAdding(false);
     if (error) {
       setError(error.message);
@@ -64,14 +66,16 @@ export default function WorkersScreen() {
   }
 
   async function handleToggle(id: string, current: boolean) {
-    await supabase.from("workers").update({ is_active: !current }).eq("id", id);
+    if (!supabaseClient) return;
+    await supabaseClient.from("workers").update({ is_active: !current }).eq("id", id);
     setWorkers((prev) =>
       prev.map((w) => (w.id === id ? { ...w, is_active: !current } : w))
     );
   }
 
   async function handleLogout() {
-    await supabase.auth.signOut();
+    if (!supabaseClient) return;
+    await supabaseClient.auth.signOut();
     router.replace("/admin/login");
   }
 

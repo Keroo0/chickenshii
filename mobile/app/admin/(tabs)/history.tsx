@@ -14,7 +14,7 @@ import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import { Download, LogOut, Search } from "lucide-react-native";
 import { TextInput } from "react-native";
-import { supabase } from "../../../services/supabase";
+import { supabase as supabaseClient } from "../../../services/supabase";
 import { colors } from "../../../constants/colors";
 import HistoryListItem from "../../../components/HistoryListItem";
 import { HistoryItem } from "../../../types";
@@ -28,7 +28,11 @@ export default function HistoryScreen() {
 
   const fetchData = useCallback(async () => {
     try {
-      const { data: predictions } = await supabase
+      if (!supabaseClient) {
+        setHistory([]);
+        return;
+      }
+      const { data: predictions } = await supabaseClient
         .from("predictions")
         .select("id, image_url, prediction, confidence, created_at, worker_id")
         .is("deleted_at", null)
@@ -44,7 +48,7 @@ export default function HistoryScreen() {
       ];
       let workerMap: Record<string, string> = {};
       if (workerIds.length > 0) {
-        const { data: workers } = await supabase
+        const { data: workers } = await supabaseClient
           .from("workers")
           .select("id, name")
           .in("id", workerIds);
@@ -87,7 +91,8 @@ export default function HistoryScreen() {
   });
 
   async function handleDelete(id: string) {
-    await supabase
+    if (!supabaseClient) return;
+    await supabaseClient
       .from("predictions")
       .update({ deleted_at: new Date().toISOString() })
       .eq("id", id);
@@ -119,7 +124,8 @@ export default function HistoryScreen() {
   }
 
   async function handleLogout() {
-    await supabase.auth.signOut();
+    if (!supabaseClient) return;
+    await supabaseClient.auth.signOut();
     router.replace("/admin/login");
   }
 

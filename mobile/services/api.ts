@@ -12,8 +12,12 @@ const api = axios.create({
 
 /** Load saved URL from SecureStore and apply to axios. Call once on app startup. */
 export async function loadSavedApiUrl(): Promise<string> {
-  const saved = await SecureStore.getItemAsync(API_URL_KEY);
-  if (saved) api.defaults.baseURL = saved;
+  try {
+    const saved = await SecureStore.getItemAsync(API_URL_KEY);
+    if (saved) api.defaults.baseURL = saved;
+  } catch {
+    // ponytail: SecureStore fails on devices without hardware keystore
+  }
   return api.defaults.baseURL as string;
 }
 

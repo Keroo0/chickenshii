@@ -12,7 +12,7 @@ import { useRouter } from "expo-router";
 import { LineChart } from "react-native-chart-kit";
 import { Dimensions } from "react-native";
 import { Microscope, Syringe, Bug, LogOut, ChevronRight } from "lucide-react-native";
-import { supabase } from "../../../services/supabase";
+import { supabase as supabaseClient } from "../../../services/supabase";
 import { colors, diseaseColors } from "../../../constants/colors";
 import DecorativeBackground from "../../../components/DecorativeBackground";
 import HistoryListItem from "../../../components/HistoryListItem";
@@ -72,7 +72,13 @@ export default function OverviewScreen() {
     }
 
     try {
-      const { data: predictions } = await supabase
+      if (!supabaseClient) {
+        setDiseaseCounts({});
+        setChartData({ labels, data: [[], [], []] });
+        setRecentHistory([]);
+        return;
+      }
+      const { data: predictions } = await supabaseClient
         .from("predictions")
         .select("id, prediction, created_at")
         .is("deleted_at", null)
@@ -138,7 +144,7 @@ export default function OverviewScreen() {
       setChartData({ labels, data: chartArrays });
       
       // Fetch Recent History (Top 3)
-      const { data: recentPreds } = await supabase
+      const { data: recentPreds } = await supabaseClient
         .from("predictions")
         .select("id, image_url, prediction, confidence, created_at, worker_id")
         .is("deleted_at", null)
@@ -149,7 +155,7 @@ export default function OverviewScreen() {
         const workerIds = [...new Set(recentPreds.map((p) => p.worker_id).filter(Boolean))];
         let workerMap: Record<string, string> = {};
         if (workerIds.length > 0) {
-          const { data: workers } = await supabase
+          const { data: workers } = await supabaseClient
             .from("workers")
             .select("id, name")
             .in("id", workerIds);
@@ -189,7 +195,8 @@ export default function OverviewScreen() {
   };
 
   async function handleLogout() {
-    await supabase.auth.signOut();
+    if (!supabaseClient) return;
+    await supabaseClient.auth.signOut();
     router.replace("/admin/login");
   }
 
@@ -360,7 +367,8 @@ export default function OverviewScreen() {
             key={item.id} 
             item={item} 
             onDelete={async (id) => {
-              await supabase.from("predictions").update({ deleted_at: new Date().toISOString() }).eq("id", id);
+              if (!supabaseClient) return;
+              await supabaseClient.from("predictions").update({ deleted_at: new Date().toISOString() }).eq("id", id);
               onRefresh(); // re-fetch data
             }} 
           />

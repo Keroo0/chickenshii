@@ -17,7 +17,7 @@ import SaveWorkerModal from "../components/SaveWorkerModal";
 import RetrySaveBanner from "../components/RetrySaveBanner";
 
 import api from "../services/api";
-import { supabase } from "../services/supabase";
+import { supabase as supabaseClient } from "../services/supabase";
 import { diseaseInfo } from "../utils/diseaseInfo";
 import { Worker, PredictionResult } from "../types";
 
@@ -51,8 +51,13 @@ export default function ResultScreen() {
   async function handleOpenSave() {
     setShowSaveModal(true);
     setWorkersLoading(true);
+    if (!supabaseClient) {
+      setWorkers([]);
+      setWorkersLoading(false);
+      return;
+    }
     try {
-      const { data } = await supabase
+      const { data } = await supabaseClient
         .from("workers")
         .select("id, name")
         .eq("is_active", true)
